@@ -5,9 +5,12 @@ method in `prompts/sales-funnel-report-prompt.md`. Word version:
 `deliverables/Sales-Funnel-Report-2026-07.docx`.
 Cohort windows are complete (14-day conversion windows end ≥Jul 14 < today);
 July cohorts are shown for volume only, never for conversion rates.
-Timezone: Mixpanel project time, calendar days. **All dollar analysis is
-blocked** (prod `user_payments` + IMAI Close org access) and intentionally
-absent per ground rules.
+Timezone: Mixpanel project time, calendar days. **Dollar figures cover the
+STRIPE SELF-SERVE ENGINE ONLY** (the Stripe→Mixpanel integration's
+`Amount Charged`, whole USD, `Status='succeeded'`). They exclude Cardcom
+(IL) charges and all manual/enterprise Close deals — the majority of paying
+accounts — and are unverified against the Stripe dashboard (Q28). Webhook
+events still carry no usable dollars (Q27 + 36%-coverage rule).
 
 ## Executive summary
 
@@ -27,7 +30,16 @@ absent per ground rules.
    renewal tracking (`Won (Renewed/Expanded)`) began April. But sales
    top-of-funnel is flat: ~25–39 scheduled meetings/month regardless of the
    5× signup surge.
-5. **Expansion remains a vacuum** (2–5 upgrades/month) and active trial
+5. **Stripe self-serve revenue is in decline despite the funnel wins:**
+   gross succeeded charges fell from ~$150.8k/mo (Nov 2025) to ~$67.3k/mo
+   (Jun 2026). Payers recovered off the February trough (86 → 119 by June)
+   but revenue-per-payer fell ~$874 → ~$565 — new self-serve cohorts buy
+   smaller plans than the legacy base churning out. Growing conversion
+   counts have not yet offset the mix shift.
+6. **Customer $ value (Stripe, trailing 12 mo):** average payer worth
+   $2,549 in total charges; median $959; p90 $5,489; 3.35 successful
+   charges per payer on average.
+7. **Expansion remains a vacuum** (2–5 upgrades/month) and active trial
    cancels improved from 60% of trials (May) to 41% (June).
 
 ## Funnel A — self-serve, monthly cohorts
@@ -74,6 +86,48 @@ July 1–20 cohort (86 trials): 40% opened the unlock modal; modal-openers
 converted 15% (5/34) vs 13% cohort baseline (11/86). No lift evidence yet;
 samples tiny; re-run with ≥2 full cohorts in September.
 
+## Self-serve dollars — Stripe engine only
+
+Source: Stripe→Mixpanel integration, `Payment Attempt` with
+`Status='succeeded'`, `Amount Charged` in whole USD (validated against the
+value distribution: plan-price shapes 99/499/599/1199/1200 + custom
+amounts; failed charges log $0 and are excluded). **Not covered:** Cardcom
+(IL) self-serve and all manual/invoiced Close deals. Completeness vs the
+Stripe dashboard is unverified (Q28) — treat as directional until checked.
+
+| Month | Gross revenue (succeeded) | Unique payers | Revenue / payer | Refunds |
+|---|---|---|---|---|
+| Nov 2025 | $150,836 | 171 | $882 | $12,267 |
+| Dec 2025 | $139,038 | 159 | $874 | $7,240 |
+| Jan 2026 | $100,438 | 127 | $791 | $6,209 |
+| Feb 2026 | $78,271 | 86 | $910 | $3,396 |
+| Mar 2026 | $74,628 | 88 | $848 | $1,419 |
+| Apr 2026 | $86,764 | 99 | $876 | $9,142 |
+| May 2026 | $80,210 | 108 | $743 | $2,126 |
+| Jun 2026 | $67,258 | 119 | $565 | $3,021 |
+| Jul → 20 | $50,672 | 64 | $792 | $1,896 |
+
+Readings:
+
+- **The Stripe engine shrank ~55% Nov→Jun** while the funnel improved. The
+  payer count bottomed in February (86) and has recovered every month since
+  (119 by June) — but revenue/payer fell to $565 in June, so gross kept
+  sliding. The new self-serve cohorts skew to $99/$499; the revenue lost is
+  higher-value legacy payers rolling off. July's partial pace (~$76k
+  full-month equivalent) suggests stabilization.
+- **Customer value (trailing 12 months, all Stripe payers):** average total
+  charged per payer **$2,549**; median **$959**; p90 **$5,489**; average
+  **3.35 succeeded charges** per payer. Use median for a typical self-serve
+  customer; the mean is pulled up by a heavy tail (custom charges up to
+  $7,500 observed).
+- **Observed price points don't match the documented $99/$499/$1200 list.**
+  Apr–Jul succeeded-charge mix by amount: $499×97, $599×69, $99×46,
+  $175×42, $959×27, $1199/1200×20, plus a long custom tail ($1,916×4 …
+  $7,500). $599, $959, $175 are undocumented price points — pricing has
+  evolved past the docs (worth confirming which plans these are).
+- **Refunds run ~2–8% of gross** ($1.4k–$12.3k/mo; April spiked to $9.1k
+  during the abuse wave).
+
 ## Funnel B — sales-led (Close CRM mirrors — approximate)
 
 Stage events are Close pipeline mirrors without `status_id` (ambiguous
@@ -110,7 +164,7 @@ stage-conversion or velocity claims. Won:Lost improved from roughly 1:1
 
 | Missing | Blocker | Unblocks |
 |---|---|---|
-| Dollars (MRR, ARPU, NRR, deal values) | prod `user_payments` + IMAI Close org (connector reaches NewVoices org, Q6) | The full revenue picture; §4 of the spending plan |
+| Complete dollars (Cardcom + manual deals; MRR, NRR) | prod `user_payments` + IMAI Close org (connector reaches NewVoices org, Q6); Stripe-integration completeness unverified (Q28) | The full revenue picture (Stripe-only view above is partial) |
 | Abuse-gate false-positive rate | Block payloads stripped from Mixpanel (Q27); need logs DB (Q3) | Gate precision audit, recovery path sizing |
 | Signup→card behavioral diagnosis | Segment uninstrumented (no events between signup and card result) | The single biggest funnel lever |
 | Sales stage velocity | Mirrors lack status_id + only 3 months of history | True sales-funnel conversion rates |
@@ -143,5 +197,7 @@ Mixpanel project 3432835, queried live 2026-07-21: monthly insights
 reports (14-day window, unique count) Feb–Jun; geo breakdown of
 `free_trial_blocked` vs `Free Trial Signup` Apr 1–Jul 20; `Payment Attempt`
 by `Status`. Baselines from `11-spending-report-plan.md` §7 and the event
-dictionary. No dollar figures by design (events ≈36% of recurring dollars,
-June 2026).
+dictionary. Dollar figures come solely from the Stripe→Mixpanel
+integration (`Amount Charged`, Status=succeeded) — Stripe self-serve only,
+unverified vs the Stripe dashboard (Q28); webhook-event dollars remain
+unusable (stripped, Q27; ≈36% coverage).
