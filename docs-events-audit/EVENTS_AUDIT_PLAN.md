@@ -1,0 +1,350 @@
+# Events Audit & Documentation Plan — Mixpanel / AWS / Analytics Pipeline
+
+**Status:** Executed 2026-07-20 to the limit of available access — see
+[00-overview.md](./00-overview.md) for the document index and per-sprint
+state, and [OPEN_QUESTIONS.md](./OPEN_QUESTIONS.md) for what remains blocked.
+Sprint 1 → 01-architecture.md · Sprint 2 → 02/03 · Sprint 3 → 04/05/06 ·
+Sprint 4 → 07/08 (playbook ready, execution needs access) · Sprint 5 → 09/10.
+**Date:** 2026-07-20
+**Goal:** Produce authoritative documentation of every product/marketing event the platform
+emits, how each event travels to its destinations (Mixpanel, the logs/"pixel" DB, Close CRM,
+Klaviyo, GA4/GTM, Clarity, Segment), and use that documentation to understand how users use
+the platform — then fix the gaps the audit exposes.
+
+---
+
+## Part 1 — Current-state findings (from the codebase audit)
+
+### 1.1 The big picture
+
+There is **no direct Mixpanel or AWS SDK integration anywhere in this repo.** The event
+pipeline is indirect:
+
+```
+                      FRONTEND (Angular)
+   GTM dataLayer ×2 containers · GA4 (ngx-google-analytics) · MS Clarity
+   Segment/"PRophet" · VWO · Sentry
+        │
+        │  POST /data/pipedrive/trial-event  (trial-friction events)
+        ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  IN-REPO EMITTERS → axios POST to CLOSE_WEBHOOK_URL(_<LABEL>)    │
+│  1. backend/main  users.service.ts:3729  (~50 events, prod-only) │
+│  2. proxy         index.js:112           (2 search events, NOT   │
+│                                           prod-gated)            │
+│  3. social-listening  social-listening-users.service.ts:36       │
+│                       (2+ events, prod-only, no label override)  │
+└──────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+   CLOSE_WEBHOOK_URL  ←──  ❓ EXTERNAL PIPELINE, NOT IN THIS REPO ❓
+        │
+        ├──► imai_events table (~4.6M rows) in the logs/"pixel" Postgres DB
+        │        └──► Mixpanel sync (lossy + lagging — per usage-ai/SCHEMA.md;
+        │             user.mixpanel_sync column tracks per-user sync state)
+        ├──► Close CRM (leads/opportunities; stage names mirrored BACK into imai_events)
+        └──► Klaviyo (7 lifecycle metrics + ~97 event-named lists; ~10% event loss)
+```
+
+**The "AWS" part of the question is almost certainly this external pipeline** (the webhook
+receiver, the logs DB host, and the Mixpanel sync job) — the only AWS touchpoint in the
+codebase itself is a static S3 bucket
+(`influencerprofiles.s3.ap-northeast-1.amazonaws.com/pixel.js`) serving the white-label
+conversion-pixel script. All in-repo object storage is Google Cloud Storage. Confirming
+where the webhook receiver and sync jobs actually run (AWS Lambda? make.com? a VM?) is
+**Sprint 1's core task**.
+
+### 1.2 Emitter #1 — backend/main (`sendPipeDriveWebhook`)
+
+`backend/main/src/users/services/users.service.ts:3729`. Fire-and-forget, `NODE_ENV==='prod'`
+only, enriches payload with `name`, `email`, `main_user_id`, resolves per-white-label URL
+`CLOSE_WEBHOOK_URL_<LABEL>` (falls back to default; strips white-label identity from the
+payload — this is why `imai_events` cannot distinguish white-label traffic).
+Despite the name, the destination is the **Close** webhook, not Pipedrive.
+
+**Lifecycle / billing events** (users + payments controllers/services):
+`signup`, `user_created_by_admin`, `team_member_added`, `user_logged_in`,
+`finished_onboarding`, `started_cancellation_process`, `cancel_trial` / `cancel_subscription`
+(one event per cancel, chosen by subscription state), `deactivate_account`,
+`new_subscription_trial`, `new_subscription_payment`, `payment_success`, `payment_failed`,
+`upgrade_package_payment`, `free_trial_blocked`, `manual_subscription_purchase_blocked`,
+`duplicate_charge_prevented`, `trial_charge_exception`, `new_trial_email_failed`,
+`scheduled_forced_onboarding_tehilla`.
+
+**Product-usage events** (feature controllers):
+`influencer_discovery_search` (3 additional call sites beyond the proxy),
+`created_campaign` + `campaign_created` (both fire on create — likely accidental duplicate),
+`first_campaign_created`, `influencer_added_to_campaign` (2 sites),
+`created_report`, `report_creation_attempt`, `report_creation_failed`, `first_report_created`,
+`first_list_created`, `created_geo_analysis`, `regenerated_geo_analysis`,
+`pr_journalist_search`, `pr_created_media_list`, `pr_generated_pitch`, `pr_sent_pitch`,
+`created_social_listening_report`, `generated_social_trends_insight`.
+
+**Dynamic trial-friction families** (added 2026-06-30, deduped once/day per user+event):
+- `trial_{feature}_daily_limit_reached[_day{N}]`, `trial_{feature}_total_limit_reached`,
+  `trial_feature_blocked` — emitted server-side from quota enforcement
+  (`users.service.ts:1689–1715`, `1936`).
+- `trial_upgrade_*`, `trial_book_call_*`, `trial_unlock_modal_*`, `trial_sample_report_*` —
+  emitted by the frontend via `POST users/pipedrive/trial-event`
+  (`users.controller.ts:2382`), whitelisted by prefix + `^[a-z][a-z0-9_]{0,63}$`.
+
+### 1.3 Emitter #2 — proxy (`proxy/index.js:112`)
+
+Emits the two **highest-volume events** (~2.8M rows of `influencer_discovery_search`):
+- `influencer_discovery_search` (line 292, when `req.body.userInitiated === true`)
+- `influencer_discovery_search_paginated` (line 299, `userPaginated === true`)
+
+⚠ **Not NODE_ENV-gated** (e2e/stack-env.ts dead-ends it explicitly). Has its own white-label
+URL override implementation. The proxy also writes all **billing/usage records** to Postgres
+(`insertBillingEntity`, `incrementSubscriptionCount`, package types 1=Search, 2=Reports,
+4=Social Listening, 6=Overlap) — a parallel, DB-side usage record independent of the event
+pipeline.
+
+### 1.4 Emitter #3 — social-listening service
+
+`backend/social-listening/src/users/social-listening-users.service.ts:36` (prod-gated, no
+white-label override): `social_listening_segment_created`, `social_listening_report_ready`
+(+ a generic stage-completion hook in `segment-timing.service.ts`). Its structured pino
+`SL_EVENTS` (`segment.create.*`, `quota.*`, …) are GCP log-metrics observability only — not
+analytics.
+
+### 1.5 Frontend marketing/analytics stack (front/imai)
+
+| Layer | ID / key | Events |
+|---|---|---|
+| GTM container #1 | `GTM-PBZ6TBF` | `successful_signup` (email+google), `successful_trial_started` (value, transaction_id, email), `successful_onboarding_completed` — only 4 `pushEvent` call sites |
+| GTM container #2 ("LEADERS") | `GTM-5TRH876J` | same dataLayer — dual-tagging, purpose unconfirmed |
+| Google Ads gtag | `AW-17928663214` | conversion tags (in GTM/index.html) |
+| GA4 (ngx-google-analytics) | prod `G-TD1DHH379G`, dev `G-B1VM71MJ2V` | ~11 funnel events: `begin_checkout`, `trial_success`, `payment_success/failure`, `signup`, `google_signup`, `email_verified`, `upgrade_package`, `credit_card_error`, … |
+| GA4 Measurement Protocol (server-side!) | `G-TD1DHH379G`, hardcoded api_secret | `purchase` event from `payments.service.ts:1798` when price ∈ {99, 499, 1200} — **not prod-gated**, hardcoded `client_id` |
+| Microsoft Clarity | `kaw00ybizl` | identify(email) + 4 custom tags (`Payment Success`, `New Signup`, `Subscription Page`, `Hype Search`) |
+| Segment ("PRophet") | write key `sW20Nx…` | identify(email, {userId}) only — no track calls found |
+| VWO | account `1044481` | A/B testing (imai label only) |
+| Sentry | prod DSN | errors only |
+
+⚠ Raw `email` is pushed into `dataLayer` (Enhanced Conversions) and all white-label domains
+load IMAI's GTM/GA/Clarity/VWO tags.
+
+### 1.6 The OTHER pixel — customer conversion tracking (do not confuse)
+
+`t.imai.co` / S3 `pixel.js` / `sdk/pixel.js` is the **customer-facing e-commerce conversion
+pixel** (brands install it on their stores; Shopify/WooCommerce plugins in `sdk/`). It POSTs
+to `backend/main/src/tracking/` (`/tracking/click`, `/sdk-click`, `/conversion`, `/ping`) and
+lands in campaign DB tables (`CampaignInfluencerClicks`, `…Conversions`). This is campaign
+ROI attribution, **not** the product-analytics pipeline — but confusingly, the logs DB is
+nicknamed the "pixel" DB. Documentation must disambiguate the two.
+
+### 1.7 Side channels (complete the map, low priority)
+
+Slack webhooks (quota blocks, cancellations, mail failures — hardcoded URLs), make.com
+(`CANCELLATION_WEBHOOK_URL` + email-test hook, not prod-gated), Bubble workflows
+(`imai-ip-capture` on login/signup, `blocked-signup`, `imai-report-error` — hardcoded bearer
+token), Shopify API (tracking module), Klaviyo/Close/Google-Ads/Windsor read-side in
+`usage-ai/`. The `ai_usage` Postgres table is written by both backend/main and brand-safety.
+
+### 1.8 Known risks & unknowns surfaced by the audit
+
+1. **❓ Unknown infrastructure:** what receives `CLOSE_WEBHOOK_URL`? What writes
+   `imai_events`? What runs the Mixpanel sync (and what sets `user.mixpanel_sync`)? Where is
+   `t.imai.co` hosted? Is any of it on AWS? — *nothing in-repo answers these.*
+2. **Unattributed events:** `high_value_signup`, `scheduled_demo_*`, `scheduled_ai_agent_call*`
+   exist in `imai_events` / Klaviyo but have **no emitter in this repo** (likely the external
+   pipeline, Close automations, or Calendly/make.com).
+3. **Known lossiness:** Mixpanel sync lags; webhook→Klaviyo drops ~1 in 10 events;
+   `payment_success` captures only ~36% of recurring dollars; April 2026
+   `new_subscription_payment` gap (per `usage-ai/SCHEMA.md`, verified July 2026).
+4. **Env-gating inconsistency:** proxy emitter, GA4 MP `purchase`, make.com email-test, and
+   Slack block-webhooks fire from **non-prod** environments.
+5. **Taxonomy drift:** `created_campaign` **and** `campaign_created` both fire on campaign
+   creation; three separate emitter implementations; duplicated `PipeDriveData` type; Close
+   stage names mixed into the same event namespace as product events.
+6. **White-label blindness:** emitters strip `whiteLabelId`; reseller traffic is only
+   best-effort identifiable in `imai_events`.
+7. **Hardcoded secrets in source:** Slack webhook URLs, Bubble bearer token, GA4 api_secret.
+8. **PII:** raw email in GTM dataLayer, Clarity identify by email, `imai_events` stores
+   email + IP.
+
+---
+
+## Part 2 — Sprint plan
+
+Five sprints (each sized for ~1 week of one engineer + part-time data/marketing support;
+double the calendar time if capacity is shared). Sprints 2 and 3 can run in parallel.
+Every sprint ends with documentation merged into `docs/events-audit/`.
+
+### Sprint 1 — Pipeline discovery & end-to-end architecture (the unknowns)
+
+The codebase audit (Part 1) is done; this sprint closes the gaps it *cannot* answer —
+primarily the Mixpanel/AWS legs the whole project is about.
+
+**Tasks**
+1. Resolve `CLOSE_WEBHOOK_URL` (+ every `CLOSE_WEBHOOK_URL_<LABEL>`) from prod env/secret
+   stores. Identify the receiver: make.com scenario, AWS API Gateway/Lambda, Zapier, or
+   custom service. Document each hop from webhook → `imai_events` insert.
+2. Locate the logs/"pixel" DB: host, cloud provider (AWS RDS?), owner, retention, backup,
+   access policy. Inventory its full schema (tables + views: `imai_events`,
+   `trial_analytics_report`, `user_base_info`, `user_daily_usage`, `google_ads_*`,
+   `resellers`, `click_scoring`).
+3. Reverse-engineer the **Mixpanel sync**: what job reads `imai_events` (or the webhook)
+   and pushes to Mixpanel, its schedule, its identity mapping (`user_id` vs email vs
+   `main_user_id`), what sets `user.mixpanel_sync`, and what "lossy/lagging" means in
+   numbers (sample 30 days: imai_events count vs Mixpanel count per event).
+4. Identify emitters of the orphan events (`high_value_signup`, `scheduled_demo_*`,
+   `scheduled_ai_agent_call*`) — check make.com, Close automations, Calendly webhooks.
+5. Map the Klaviyo sync mechanism (same webhook fan-out?) and the Close-stage →
+   `imai_events` mirror.
+6. Resolve `t.imai.co` hosting (CDN? CloudFront+S3? reverse proxy to `/data/tracking`?).
+7. Draw the authoritative end-to-end data-flow diagram (mermaid) covering every hop.
+
+**Access needed:** prod env vars/secrets, make.com account, AWS/GCP consoles, Mixpanel
+admin, Klaviyo admin, Close automations, DNS/CDN config.
+
+**Deliverables:** `01-architecture.md` (diagram + per-hop description + infra ownership
+table) · answered/updated "unknowns" list · risk register updated.
+
+**Exit criteria:** every arrow in the §1.1 diagram is confirmed (or documented as
+unreachable), including exactly which parts run on AWS.
+
+### Sprint 2 — Server-side event dictionary (the canonical catalog)
+
+**Tasks**
+1. Build the **event dictionary**: one entry per event name (≈55 static + 4 dynamic
+   families) with: trigger (user action / cron / admin), emitting service + file:line,
+   payload schema (incl. auto-enrichment: `name`, `email`, `main_user_id`; `amount`
+   semantics — whole USD, ×1.17 IL VAT quirk), gating (prod-only? deduped once/day?),
+   destinations (imai_events / Mixpanel / Klaviyo list / Close), volume (30-day count from
+   `imai_events`), and known caveats (import the verified gotchas from
+   `backend/main/src/usage-ai/SCHEMA.md` — cancel_trial birth date, payment_success
+   coverage, payment_failed dunning noise, team-member user_id vs main_user_id, etc.).
+2. Document the three emitter implementations side-by-side (gating, white-label handling,
+   payload enrichment differences) and the proxy's DB-side billing/usage records as a
+   parallel usage source.
+3. Document the trial-event whitelist contract (`POST users/pipedrive/trial-event`) —
+   allowed prefixes, regex, dedup — as the frontend↔backend interface.
+4. Validate the catalog against reality: per-event row counts and payload-field fill rates
+   in `imai_events` (catches events that are documented-but-dead or emitting empty fields).
+
+**Deliverables:** `02-event-dictionary.md` (or one file per domain: lifecycle, billing,
+usage, trial-friction, sales-mirror) · `03-emitters.md` · SQL snippets used for validation.
+
+**Exit criteria:** every distinct `event` value that appeared in `imai_events` in the last
+90 days is either in the dictionary or explicitly listed as unknown-origin.
+
+### Sprint 3 — Client-side & marketing-tag audit (parallel with Sprint 2)
+
+**Tasks**
+1. Document the frontend stack (§1.5) per layer: what fires, payload, destination, ID.
+2. **GTM container audit** (needs GTM access): export both containers (`GTM-PBZ6TBF`,
+   `GTM-5TRH876J`), document every tag/trigger/variable — which dataLayer events feed which
+   pixels (Google Ads `AW-17928663214`, GA4, anything else hiding in GTM). Determine
+   whether the "LEADERS" container is intentional; recommend removal if not.
+3. Cross-map client funnel events ↔ server events (e.g. GTM `successful_trial_started` ↔
+   server `new_subscription_trial` ↔ GA4 MP `purchase`) including the `transaction_id`
+   dedup contract, and flag double-counting risk.
+4. PII & consent review: email in dataLayer/Clarity/Segment, `imai_events` email+IP, white-
+   label domains loading IMAI tags — document current behavior and produce a
+   recommendation (this feeds Sprint 5 remediation).
+5. Document the customer conversion pixel (`sdk/pixel.js`, Shopify/WooCommerce plugins,
+   `/tracking/*` endpoints, attribution chain clickId→coupon→IP) in its own doc, clearly
+   separated from product analytics.
+
+**Deliverables:** `04-frontend-analytics.md` · `05-gtm-containers.md` · `06-conversion-pixel.md`
+· PII findings section.
+
+**Exit criteria:** a product person can answer "what fires when a user signs up, starts a
+trial, or pays — in every tool" from the docs alone.
+
+### Sprint 4 — Destination validation & data-quality measurement
+
+Turn the qualitative "lossy/lagging" claims into measured facts.
+
+**Tasks**
+1. **Mixpanel workspace audit:** inventory Mixpanel events/properties; diff against the
+   Sprint 2 dictionary (events in Mixpanel not in the catalog and vice versa); measure sync
+   lag (event timestamp vs Mixpanel ingest) and loss rate per event over 30 days; document
+   Mixpanel identity resolution and the health-score formula (already replicated in
+   `usage-board.service.ts:1909` — link both).
+2. **Klaviyo audit:** verify the 7 lifecycle metrics + list-per-event mirrors against the
+   dictionary; quantify the ~10% loss; document the single-event routing rule
+   (cancel_trial vs cancel_subscription lists).
+3. **imai_events data quality:** per-event daily-volume dashboards/queries; anomaly scan for
+   historical gaps (April 2026 payment gap pattern); field fill-rate checks; duplicate-fire
+   check (`new_subscription_payment` double-fires, `created_campaign`+`campaign_created`).
+4. **Coverage matrix:** for the ~15 most important user actions, a row showing where each is
+   visible (proxy billing DB / imai_events / Mixpanel / Klaviyo / GA4 / Close) — the
+   at-a-glance "can I trust this number in this tool" table.
+5. Cross-check billing truth: `user_payments` (prod) vs payment events vs Mixpanel revenue.
+
+**Deliverables:** `07-destinations.md` (Mixpanel + Klaviyo + Close) · `08-data-quality.md`
+(measured lag/loss/gaps + coverage matrix) · reusable validation SQL.
+
+**Exit criteria:** for each destination, documented answer to "how complete and how fresh
+is this data, per event family" with numbers.
+
+### Sprint 5 — Gap analysis, taxonomy & governance (+ remediation backlog)
+
+**Tasks**
+1. **Tracking plan v1:** propose the canonical event taxonomy (naming convention, required
+   properties, identity rules `user_id`/`main_user_id`, white-label tagging) and map every
+   existing event to keep/rename/deprecate/merge (e.g. resolve
+   `created_campaign` vs `campaign_created`).
+2. **Missing-events gap list:** user actions product wants to understand that emit nothing
+   today (page-level engagement, feature adoption outside the current set, session depth —
+   interview stakeholders; today `user_logged_in` is the only session proxy).
+3. **Engineering hardening backlog**, prioritized:
+   - Extract a single shared event-emitter contract (typed event-name enum/union, one
+     payload interface — kills the duplicate `PipeDriveData` and cross-service drift).
+   - Env-gate the proxy emitter + GA4 MP call (or route through a test destination); move
+     hardcoded Slack/Bubble/GA4 secrets to env vars.
+   - Add `white_label` field to the event payload before stripping identity.
+   - Optional: CI guardrail — lint/test that fails when a new `sendPipeDriveWebhook` event
+     name isn't in the dictionary.
+4. **Governance:** ownership per pipeline hop, change process (new event = dictionary PR +
+   destination check), review cadence, and where the docs live (this folder; consider
+   surfacing in `MASTER_SYSTEM_DOCUMENTATION.md`).
+5. Executive summary: "how users use the platform" — what questions the audited pipeline
+   can and cannot answer today, with pointers into the docs.
+
+**Deliverables:** `09-tracking-plan.md` · `10-gaps-and-remediation.md` (ticket-ready
+backlog) · `00-overview.md` (executive summary + index, written last).
+
+**Exit criteria:** stakeholder-reviewed tracking plan; remediation backlog estimated and
+prioritized; documentation index complete.
+
+### Sprint 6 (optional, scope after Sprint 5) — Remediation implementation
+
+Implement the top of the Sprint 5 backlog: shared emitter module + typed catalog,
+env-gating fixes, secret extraction, white-label tagging, taxonomy renames (with
+Mixpanel/Klaviyo migration aliases), and any quick-win missing events.
+
+---
+
+## Appendix A — Access checklist (request before Sprint 1)
+
+- [ ] Prod environment variables / secret store (all services) — `CLOSE_WEBHOOK_URL*`,
+      `CANCELLATION_WEBHOOK_URL`, logs-DB credentials
+- [ ] Logs/"pixel" DB read access (`imai_events` + views)
+- [ ] Mixpanel project admin (Lexicon, ingestion logs)
+- [ ] GTM containers `GTM-PBZ6TBF`, `GTM-5TRH876J`; GA4 properties `G-TD1DHH379G`
+- [ ] make.com account (webhook scenarios), Klaviyo admin, Close admin (automations)
+- [ ] AWS console (S3 `influencerprofiles`, plus whatever Sprint 1 uncovers), GCP console
+- [ ] DNS/CDN config for `t.imai.co`, `cdn.influencermarketing.ai`
+
+## Appendix B — Source pointers (verified in this audit)
+
+| Thing | Location |
+|---|---|
+| Main emitter | `backend/main/src/users/services/users.service.ts:3729` |
+| Trial-event whitelist endpoint | `backend/main/src/users/users.controller.ts:2382` |
+| Trial-friction server emitters | `backend/main/src/users/services/users.service.ts:1652–1743,1936` |
+| Proxy emitter (not prod-gated) | `proxy/index.js:112` (call sites :292, :299) |
+| Social-listening emitter | `backend/social-listening/src/users/social-listening-users.service.ts:36` |
+| GA4 server-side purchase | `backend/main/src/users/services/payments.service.ts:1798` |
+| Frontend GTM service | `front/imai/src/app/shared/services/utils/gtm.service.ts` |
+| Frontend Clarity service | `front/imai/src/app/shared/services/utils/analytics.service.ts` |
+| Frontend trial-event bridge | `front/imai/src/app/core/services/trial-gating.service.ts:49` |
+| Third-party tags | `front/imai/src/index.html`, `front/imai/src/main.ts` |
+| Customer conversion pixel | `sdk/pixel.js`, `backend/main/src/tracking/` |
+| Event semantics knowledge base | `backend/main/src/usage-ai/SCHEMA.md` (verified gotchas) |
+| `mixpanel_sync` column | `backend/main/src/users/entities/user.entity.ts:233` |
+| e2e webhook seam note | `e2e/stack-env.ts:119` |

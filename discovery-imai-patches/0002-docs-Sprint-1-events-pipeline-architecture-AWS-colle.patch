@@ -1,0 +1,179 @@
+From 4b0557d3785b626ca5e537516dcd0d3229cdd7eb Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 20 Jul 2026 15:43:55 +0000
+Subject: [PATCH 2/7] =?UTF-8?q?docs:=20Sprint=201=20events-pipeline=20arch?=
+ =?UTF-8?q?itecture=20=E2=80=94=20AWS=20collector=20located,=20GCP=20topol?=
+ =?UTF-8?q?ogy=20confirmed?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Live DNS/HTTP probes + deploy-config audit: t.imai.co is an AWS API
+Gateway custom domain (eu-central-1); the white-label pixel.js beacons
+page visits (URL + UTM/gclid) to a second API Gateway endpoint; the
+platform itself runs on GCP (GCE 'Leaders Prod', Cloud Run, GCS).
+Documents answered vs open unknowns and the prioritized access requests
+needed to finish Sprint 1.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XUduGDBwL4mE8PagCqcPMY
+---
+ docs/events-audit/01-architecture.md | 146 +++++++++++++++++++++++++++
+ 1 file changed, 146 insertions(+)
+ create mode 100644 docs/events-audit/01-architecture.md
+
+diff --git a/docs/events-audit/01-architecture.md b/docs/events-audit/01-architecture.md
+new file mode 100644
+index 00000000..69fc62dc
+--- /dev/null
++++ b/docs/events-audit/01-architecture.md
+@@ -0,0 +1,146 @@
++# 01 — End-to-End Events Architecture (Sprint 1)
++
++**Status:** Draft v1 — codebase + live-probe evidence gathered 2026-07-20.
++Remaining unknowns require credentials/console access (see §5).
++**Parent plan:** [EVENTS_AUDIT_PLAN.md](./EVENTS_AUDIT_PLAN.md)
++
++---
++
++## 1. Confirmed topology
++
++```
++USER BROWSER
++│
++├─[A] Marketing/analytics tags (client-side)
++│     GTM ×2 (GTM-PBZ6TBF, GTM-5TRH876J) · GA4 (G-TD1DHH379G) · Google Ads
++│     (AW-17928663214) · MS Clarity (kaw00ybizl) · Segment/"PRophet" · VWO
++│
++├─[B] AWS pixel beacon  ★ THE "AWS" LEG — CONFIRMED
++│     Frontend injects <script src="https://t.imai.co"> on:
++│       · trial activation   front/imai/src/app/modules/home/home.component.ts:116 (?u=1)
++│       · influencer search  front/imai/src/app/modules/influencers/influencers.component.ts:351
++│     t.imai.co  = CNAME → d-gnyi890n7g.execute-api.eu-central-1.amazonaws.com
++│                  (AWS API Gateway custom domain, Frankfurt)          [DNS probe]
++│     White-label variant: S3 influencerprofiles.s3.ap-northeast-1.amazonaws.com/pixel.js
++│       (373 B, last-modified 2023-11-28) — beacons a tracking <img> to:
++│       https://47dwgl20q6.execute-api.eu-central-1.amazonaws.com/prod
++│              ?saveData=true&url=<hostname+path>&<original query string>
++│       → carries full query params (UTMs, gclid) at page-visit time    [fetched live]
++│     ⇒ AWS API Gateway (+ presumed Lambda) in eu-central-1 is the page-visit/
++│       funnel-moment collector. Presumed writer of visit data into the logs DB
++│       (fits the DB's "pixel" nickname and the gclid/ip columns in the
++│       attribution data). Lambda + its target NOT yet confirmed (§5).
++│
++▼
++APP (all on GOOGLE CLOUD — confirmed from deploy/)
++│   GCE VMs discovery-prod / discovery-stag, project "Leaders Prod", pm2
++│   (deploy/deploy.js, deploy/readme.md). imai.co / app.influencermarketing.ai
++│   → 34.34.53.159 (GCP); cdn.influencermarketing.ai → 34.96.68.123 (GCP LB).
++│   Server-only services not in repo: backend/scraper, backend/frontend-logger.
++│   Cloud Run: backend/cloud/campaign-tracker (post metrics, not analytics).
++│   Object storage: GCS only.
++│
++├─[C] Server event emitters → axios POST → CLOSE_WEBHOOK_URL(_<LABEL>)
++│       1. backend/main   users.service.ts:3729   (~50 events, prod-gated)
++│       2. proxy          index.js:112            (search events, NOT gated)
++│       3. social-listening social-listening-users.service.ts:36 (prod-gated)
++│     Value of CLOSE_WEBHOOK_URL is NOT in the repo (env only) — receiver
++│     unconfirmed (§5). Candidates: same AWS API Gateway, or make.com
++│     (the repo already uses make.com for CANCELLATION_WEBHOOK_URL and the
++│     email-test hook).
++│
++▼
++LOGS/"PIXEL" DB (separate Postgres; host unknown — §5)
++│   imai_events (~4.6M rows) + reporting views (trial_analytics_report,
++│   user_base_info, user_daily_usage), google_ads_* sync tables, resellers,
++│   click_scoring (dead since 2024).
++│
++├──► MIXPANEL  — sync job unknown (§5); documented as lagging/lossy
++│      (usage-ai/SCHEMA.md). user.mixpanel_sync int column on prod user table
++│      (migration 1729329521246, Oct 2024) is presumably the sync watermark.
++├──► KLAVIYO   — 7 lifecycle metrics + ~97 event-named lists (~10% loss);
++│      sync mechanism unknown (likely same webhook fan-out).
++├──► CLOSE CRM — leads/opportunities; pipeline stage names are mirrored BACK
++│      into imai_events as events (Qualification, Won, …).
++└──► GA4 server-side purchase — payments.service.ts:1798 → mp/collect
++       (bypasses the webhook pipeline entirely; not prod-gated).
++
++SEPARATE SYSTEM (do not confuse): customer e-commerce conversion pixel
++  sdk/pixel.js → imai.co/data/tracking/* (GCP backend, campaign tables)
++  + Shopify/WooCommerce plugins + Bubble order-conversion workflows
++  (api.influencermarketing.ai = Bubble behind Cloudflare 104.19.x).
++  The AWS pixel [B] is the OLDER, marketing-side visit tracker.
++```
++
++## 2. Evidence log (live probes, 2026-07-20)
++
++| Probe | Result |
++|---|---|
++| `getent hosts t.imai.co` | CNAME `d-gnyi890n7g.execute-api.eu-central-1.amazonaws.com` (18.184.x / 63.183.x) — AWS API Gateway custom domain |
++| `GET influencerprofiles.s3.ap-northeast-1.amazonaws.com/pixel.js` | 200, 373 B JS, Last-Modified 2023-11-28; beacons `<img>` to `47dwgl20q6.execute-api.eu-central-1.amazonaws.com/prod?saveData=true&url=…&<query>` |
++| `getent hosts cdn.influencermarketing.ai` | 34.96.68.123 (Google Cloud) |
++| `getent hosts imai.co / app.influencermarketing.ai` | 34.34.53.159 (Google Cloud — matches GCE deploy target) |
++| `getent hosts api.influencermarketing.ai` | 104.19.x (Cloudflare → Bubble.io) |
++| `deploy/readme.md` | "Login to Google Cloud → Leaders Prod → Compute Engine → discovery-prod / discovery-stag" |
++| GitHub repos visible to this integration | Only `InfluencerMarketing-Ai/Discovery-imai` — no pixel/lambda/sync repo discoverable with current access |
++| Close CRM (MCP connector) | Connected org is **NewVoices**, not IMAI's Close org — IMAI automations not inspectable from this session |
++
++## 3. What this means for "how events get into Mixpanel and AWS"
++
++1. **AWS ingestion is real and now located**: API Gateway in **eu-central-1**
++   (two endpoints: custom-domain `d-gnyi890n7g` behind `t.imai.co`, and raw
++   `47dwgl20q6` used by the white-label pixel). It collects page-visit beacons
++   with full query strings (UTM/gclid) and fires at high-signal funnel moments
++   (trial activation, search page). The compute behind it (Lambda presumed) and
++   its write target (logs DB presumed) need AWS-console confirmation.
++2. **Server-side product/lifecycle events** do not go to AWS from the code we
++   can see — they go to an env-configured webhook (`CLOSE_WEBHOOK_URL`). The
++   receiver is the single most important remaining unknown: it decides whether
++   Mixpanel/Klaviyo/Close fan-out happens in AWS, make.com, or elsewhere.
++3. **Mixpanel is written only by the external pipeline** — nothing in any of
++   the five services in this repo talks to Mixpanel. Documentation of "events
++   → Mixpanel" is therefore blocked on pipeline access, not more code reading.
++4. **The platform itself is GCP end-to-end** (GCE + Cloud Run + GCS). AWS is
++   used only for the pixel collector (+ the S3 script bucket, ap-northeast-1).
++
++## 4. Answered vs. open (from plan §1.8)
++
++| # | Unknown (plan) | Status |
++|---|---|---|
++| 1a | What receives CLOSE_WEBHOOK_URL | **OPEN** — env value needed (prod .env on discovery-prod, all `CLOSE_WEBHOOK_URL_<LABEL>` variants) |
++| 1b | What writes imai_events | **PARTIAL** — AWS API Gateway collector confirmed for page-visit data; webhook receiver for named events still unconfirmed |
++| 1c | Mixpanel sync job + user.mixpanel_sync writer | **OPEN** — not in repo; not GitHub-discoverable with current access |
++| 1d | t.imai.co hosting | **ANSWERED** — AWS API Gateway custom domain, eu-central-1 |
++| 1e | Which parts run on AWS | **ANSWERED** — pixel collector (API GW eu-central-1) + S3 script bucket (ap-northeast-1); everything else GCP/Cloudflare-Bubble |
++| 2 | Orphan events (high_value_signup, scheduled_demo_*, scheduled_ai_agent_call*) | **OPEN** — IMAI Close org / make.com / Calendly not accessible from this session (connector reaches a different Close org) |
++| 5 | Klaviyo sync mechanism | **OPEN** — needs Klaviyo admin or pipeline access |
++
++## 5. Access requests to close the remaining unknowns
++
++Concrete asks, in priority order:
++
++1. **`CLOSE_WEBHOOK_URL` (+ every `CLOSE_WEBHOOK_URL_<LABEL>`, `CANCELLATION_WEBHOOK_URL`)
++   values** from `backend/main/.env`, proxy env, and social-listening env on
++   `discovery-prod` (GCE, project "Leaders Prod"). One `grep -h WEBHOOK .env`
++   by anyone with SSH answers unknown 1a immediately.
++2. **AWS console access** (or an admin's 30-minute screen-share) for the account
++   owning eu-central-1 API Gateways `d-gnyi890n7g` + `47dwgl20q6`: list the
++   Lambda(s) behind them, their code/repo origin, and their DB/queue targets;
++   also S3 bucket `influencerprofiles` (ap-northeast-1) ownership. Likely also
++   hosts the logs DB (RDS?) and the Mixpanel sync — unknowns 1b/1c.
++3. **Logs-DB credentials** (read-only) — validates what the collector writes
++   (does imai_events itself receive pixel visits, or a sibling table?).
++4. **Mixpanel project admin** — Lexicon + ingestion logs (unknown 1c, Sprint 4 prep).
++5. **IMAI's Close org access** (current connector reaches the NewVoices org) +
++   **make.com** account — automations that likely emit the orphan events
++   (unknown 2) and possibly host the whole webhook fan-out.
++6. **GitHub org owner check**: are there IMAI repos this integration can't see
++   (lambda/pixel/sync code)? If the pipeline code is in GitHub, granting the
++   integration read access beats console spelunking.
++
++## 6. Sprint 1 exit criteria — scorecard
++
++- Every arrow in the diagram confirmed or explicitly marked unknown: **done above**.
++- "Exactly which parts run on AWS": **answered** (§3.4, §4).
++- Per-hop infra ownership table: **blocked** on §5 items 1–2; the doc will be
++  updated in place once env values / console access arrive.
+-- 
+2.43.0
+

@@ -1,0 +1,354 @@
+From 16327b3e1bc6d0dc156920d11ee547e83212fb6e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 20 Jul 2026 16:25:32 +0000
+Subject: [PATCH 3/7] docs: open-questions register + Sprint 2 event dictionary
+ and emitters doc
+
+- OPEN_QUESTIONS.md: living register (Q1-Q20 + answered log) to collect
+  blockers/questions across sprints without stalling progress
+- 02-event-dictionary.md: canonical catalog of every server-emitted
+  event (lifecycle, billing, usage, trial-friction families, sales
+  mirrors, orphans) with triggers, payloads, destinations, and verified
+  caveats imported from usage-ai/SCHEMA.md
+- 03-emitters.md: the three webhook emitter implementations compared,
+  trial-event bridge contract, proxy billing as parallel usage record,
+  full side-channel map, Sprint 5 hardening candidates
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XUduGDBwL4mE8PagCqcPMY
+---
+ docs/events-audit/02-event-dictionary.md | 135 +++++++++++++++++++++++
+ docs/events-audit/03-emitters.md         |  99 +++++++++++++++++
+ docs/events-audit/OPEN_QUESTIONS.md      |  72 ++++++++++++
+ 3 files changed, 306 insertions(+)
+ create mode 100644 docs/events-audit/02-event-dictionary.md
+ create mode 100644 docs/events-audit/03-emitters.md
+ create mode 100644 docs/events-audit/OPEN_QUESTIONS.md
+
+diff --git a/docs/events-audit/02-event-dictionary.md b/docs/events-audit/02-event-dictionary.md
+new file mode 100644
+index 00000000..0ef399e1
+--- /dev/null
++++ b/docs/events-audit/02-event-dictionary.md
+@@ -0,0 +1,135 @@
++# 02 — Server-Side Event Dictionary (Sprint 2)
++
++**Status:** Draft v1 — derived from code audit 2026-07-20. Volumes/fill-rates
++pending logs-DB access ([Q14](./OPEN_QUESTIONS.md)).
++**Scope:** every event POSTed to `CLOSE_WEBHOOK_URL` by the three server
++emitters (see [03-emitters.md](./03-emitters.md)). Client-side tags are
++Sprint 3. Event *semantics* caveats marked ⚠ are imported from
++`backend/main/src/usage-ai/SCHEMA.md`, where they were verified against live
++data (dates noted there).
++
++**Payload conventions** (apply to every backend/main event unless noted):
++- The emitter auto-enriches with `name`, `email`, `main_user_id` (looked up
++  from the user; see users.service.ts:3729). `user_id` + `event` are always
++  present. Extra fields below are per-call-site additions.
++- `amount` is **whole USD** (⚠ not cents); Israel-billed charges are
++  multiplied by 1.17 (VAT) before emission on some paths (noted per event).
++- Known `imai_events` columns the pipeline can populate: `id, event, user_id,
++  email, name, amount, date, main_user_id, admin_user_id, lead_id, ip,
++  reseller_stripe_cuid, user_stripe_cuid`.
++- Destinations shorthand: **E** = imai_events (logs DB), **M** = Mixpanel
++  (via external sync, lagging/lossy), **K** = Klaviyo (event-named list
++  and/or lifecycle metric), **C** = Close CRM. All webhook events are assumed
++  E+M; K/C flagged where documented. Confirmation of the fan-out is Q1.
++
++---
++
++## 1. Lifecycle — signup & onboarding
++
++| Event | Trigger | Emitter | Extra payload | Destinations | Caveats |
++|---|---|---|---|---|---|
++| `signup` | Self-serve registration completes | users.service.ts:3041 | `email, name, utm, phone` | E M K(list ×4 + `Signup` metric TgdFj8) C | ⚠ Admin-created users skip this — never compute funnels without excluding `user_created_by_admin` accounts. Klaviyo has 4 duplicate `signup` lists — aggregate by name. |
++| `user_created_by_admin` | Admin creates account (sales) | users.controller.ts:131 | `email, name, admin_user_id` | E M | Marks accounts that skip the self-serve funnel. |
++| `team_member_added` | Team member invited/added (2 paths) | users.controller.ts:219, :318 | `team_member_email` | E M K | ⚠ Team members get their own `user_id`; roll up via `main_user_id` for account-level analysis. |
++| `user_logged_in` | Login succeeds | users.controller.ts:1014 | — | E M | ⚠ The ONLY session proxy — "sessions/day" = logins/day; there is no sessions table. |
++| `finished_onboarding` | Onboarding KYC completed (only if `inviteTeamMembers` step reached) | users.controller.ts:1770 | — | E M | ⚠ Onboarding is skippable (users can go straight to /trial) — NOT a mandatory funnel edge. |
++| `scheduled_forced_onboarding_tehilla` | Forced-onboarding booking flow | users.service.ts:4468 | — | E M | Named for a CS rep; taxonomy-cleanup candidate (Sprint 5). |
++
++## 2. Lifecycle — trial
++
++| Event | Trigger | Emitter | Extra payload | Destinations | Caveats |
++|---|---|---|---|---|---|
++| `new_subscription_trial` | Trial starts (card accepted) | payments.service.ts:1634 | `email, name, amount` | E M K(`New Trial` T47iri — matches E ≈99%) C | Trials are 7 days. Trial start anchor = `min(date)` per user. |
++| `free_trial_blocked` | Card entered but user blocked (abuse prevention) | payments.service.ts:1545 | `email, name, error` | E M K | Fires alongside a Slack alert (B052AN3HQL8). |
++| `new_trial_email_failed` | Trial welcome email throws | payments.service.ts:1622 | `email, name` | E M | Operational, not behavioral. |
++| `cancel_trial` | Cancel while `endTrial` still set | users.service.ts:2190 (ternary) | `email, name, subscription_type='trial', cancellation_reason?` | E M K(single-event routing: cancelers land ONLY here, not in cancel_subscription lists) | ⚠ Exists only since **2026-04-22**; before that ALL trial cancels emitted `cancel_subscription`. ⚠ ~20/month trial users with expired `endTrial` still emit `cancel_subscription` today — complete trial-churn = union of both, deduped per user. |
++| `trial_charge_exception` | Trials cron charge attempt throws | tasks/tasks.service.ts:376 | `email, name, error` | E M | Operational. |
++
++## 3. Lifecycle — payment & churn
++
++| Event | Trigger | Emitter | Extra payload | Destinations | Caveats |
++|---|---|---|---|---|---|
++| `new_subscription_payment` | First real charge (trial→paid) — 3 paths: direct purchase, trial conversion, renewal-cron conversion | payments.service.ts:500, :1710, :2210 | `email, name, amount` (IL ×1.17 on :500 path) | E M K(`New Customer` W9Y37g since 2026-03-23) C | ⚠ THE trial→paid conversion event. Can re-fire on re-subscription (~7% of payers; one account has 34) — "first payment" = `min(date)` per user. ⚠ Can double-fire per user — dedupe. ⚠ April 2026 emitted almost nothing (thin patch) — cross-check prod `user_payments` for exact counts. |
++| `payment_success` | Recurring renewal charge succeeds (Stripe :2210 path variable / Cardcom :2325) | payments.service.ts:2210, :2325 | `email, name, amount` (Cardcom IL ×1.17) | E M | ⚠ **Partial coverage — trend shape ONLY.** June 2026: captured 57% of recurring charges but 36% of dollars (misses the big annual/enterprise renewals). Never build revenue/retention on it; use prod `user_payments`. |
++| `payment_failed` | Charge attempt fails (initial :536; Stripe renewal :2265; Cardcom renewal :2376) | payments.service.ts | `email, name, amount` | E M | ⚠ Retry/dunning noise: 6,000 events vs 44 successes in 3 weeks. Always `count(DISTINCT user_id)`. |
++| `upgrade_package_payment` | Plan upgrade charged (Stripe :1349 / Cardcom :1410) | payments.service.ts | `email, name, amount` (Cardcom IL ×1.17) | E M | Counts as a payment event for prior-payment churn filters. |
++| `duplicate_charge_prevented` | Idempotency guard blocks a double charge | payments.service.ts:2084 | `subscription_id` | E M | Operational. |
++| `manual_subscription_purchase_blocked` | Manual-payment account tries self-serve purchase | payments.controller.ts:150 | `subscription_id, package_id` | E M | |
++| `started_cancellation_process` | User enters cancel flow | users.controller.ts:2343 | `email` | E M | Churn-INTENT signal — many don't finish. ⚠ Pollutes `trial_analytics_report.cancel_date` (that view counts any `%cancel%` event). |
++| `cancel_subscription` | Cancel when `endTrial` NOT set (else `cancel_trial`) | users.service.ts:2190 (ternary) | `email, name, subscription_type='paying', cancellation_reason?` | E M K C | ⚠ NOT "paying churn" by itself — ~72% of last year's emitters were still in trial (legacy path). Paying churn requires a prior-payment EXISTS filter (recipe in SCHEMA.md). |
++| `cancel_subscription_after_ai_agent_call` | Cancel completed after AI-agent retention call | (in imai_events; emitter in cancel flow) | — | E M | Related retention-flow marker. |
++| `deactivate_account` | Account deactivated | users.service.ts:2391 | `email, name` | E M | |
++
++The cancel flow ALSO posts a rich payload (reason, competitor, message,
++subscription_amount) to make.com via `CANCELLATION_WEBHOOK_URL`
++(users.service.ts:2262) and a Slack notice — parallel channels, not
++imai_events (see 03-emitters.md §4).
++
++## 4. Product usage
++
++| Event | Trigger | Emitter | Extra payload | Destinations | Caveats |
++|---|---|---|---|---|---|
++| `influencer_discovery_search` | User-initiated discovery search | **proxy** index.js:292 (`userInitiated===true`) + backend Influencer.controller.ts:53 (search-data), :75 (linkedin), :97 (snapchat) | proxy adds `email, user_id, name` itself | E M | ⚠ ~2.8M rows — always aggregate, never scan. ⚠ Proxy emitter is NOT prod-gated (Q10). Health-score input. |
++| `influencer_discovery_search_paginated` | Pagination of a search | proxy index.js:299 (`userPaginated===true`) | same | E M | Volume event; excluded from most engagement definitions. |
++| `created_report` | Influencer report created | reports/report.controller.ts:118 | `email, name` | E M | ⚠ Excluded from the health-score event set (`event <> 'created_report'`). |
++| `report_creation_attempt` | Report requested (before success) | report.controller.ts:93 | `email, name` | E M | Pair with `created_report`/`report_creation_failed` for failure-rate. |
++| `report_creation_failed` | Report generation failed | report.controller.ts:101 | `email, name` | E M | |
++| `first_report_created` | First-ever report (quota.count===0) | report.controller.ts:125 | `email, name` | E M K(list + activation flows) | **Activation milestone** — canonical "activated trial" definition. |
++| `created_campaign` + `campaign_created` | Campaign created (BOTH fire) | campaigns.controller.ts:339 and :356 | :339 adds `email, name`; :356 none | E M | ⚠ Duplicate pair — Q9. Which one downstream consumers use is unconfirmed. |
++| `first_campaign_created` | First-ever campaign (quota.count===0) | campaigns.controller.ts:346 | `email, name` | E M K | Activation milestone. |
++| `influencer_added_to_campaign` | Influencer added (UI :833; bulk API per-item campaigns-api.service.ts:242) | campaigns.controller.ts:833 | — | E M | Health-score input ("Added Influencer to Campaign" naming variant in Mixpanel — Sprint 4 to map). |
++| `first_list_created` | First-ever list (quota.count===0) | lists/list.controller.ts:273 | `email, name` | E M K | Activation milestone. (No plain `created_list` event exists — gap candidate for Sprint 5.) |
++| `created_geo_analysis` | Geo analysis created | geo/geo.controller.ts:111 | — | E M | |
++| `regenerated_geo_analysis` | Geo analysis re-run | geo/geo.controller.ts:389 | — | E M | |
++| `pr_journalist_search` | PR module journalist search | entity/controllers/journalist.controller.ts:60 | — | E M | |
++| `pr_created_media_list` | PR media list created | entity/controllers/entity-list.controller.ts:45 | — | E M | |
++| `pr_generated_pitch` | PR pitch generated | entity/controllers/pitch.controller.ts:70 | — | E M | |
++| `pr_sent_pitch` | PR pitch sent | entity/controllers/pitch.controller.ts:125 | — | E M | |
++| `created_social_listening_report` | SL report created | social-listening.controller.ts:31 | — | E M | |
++| `generated_social_trends_insight` | SL trends insight generated | social-listening.controller.ts:115 | — | E M | |
++| `social_listening_segment_created` | SL segment pipeline starts | **social-listening svc** segment-timing.service.ts:43 | `segment_id` | E M | Emitted by the 3rd emitter (own implementation, prod-gated, no white-label routing). |
++| `social_listening_report_ready` | SL pipeline completes (once per pipeline) | segment-timing.service.ts:195 | `segment_id, mention_count, total_duration_ms?` | E M | |
++
++## 5. Trial-friction & upgrade-intent (dynamic families — since 2026-06-30)
++
++⚠ Any trend crossing 2026-06-30 is a measurement change, not behavior change.
++Server-side family is **deduped once per user+event per day** (cache in
++`sendTrialPipeDriveEvent`, users.service.ts:1652).
++
++| Family | Trigger | Emitter | Extra payload |
++|---|---|---|---|
++| `trial_{feature}_daily_limit_reached` / `..._day{N}` (N = trial day 1–7) | Daily quota hit during trial | users.service.ts:1713 (via `firePipeDriveTrialLimit`) | `feature, period, count, limit, trial_day?` — note `reports`→`report` rename |
++| `trial_{feature}_total_limit_reached` | Total trial quota hit | users.service.ts:1702 | same |
++| `trial_feature_blocked` | Gated feature attempted | users.service.ts:1936 | `feature, cta` |
++| `trial_upgrade_<placement>` | Upgrade CTA clicked; placement baked into the NAME | frontend → `POST users/pipedrive/trial-event` (users.controller.ts:2382) | `source` — placements: `top_bar, sidebar_workspace, sidebar_operations, list_banner, search_banner, campaign_list_banner, campaign_demo, report_download, report_add_to_list, influencer_report_banner, sl_list_banner, locked_403, limit_search_daily, limit_reports_daily, search_limit_empty_state` (aggregate `LIKE 'trial_upgrade_%'`) |
++| `trial_unlock_modal_opened` | Unlock modal shown (highest-volume intent signal) | same frontend bridge | `source` |
++| `trial_book_call_clicked` / `_sidebar` / `_top_bar` | Book-a-call CTA | same | `source`; opens Calendly |
++| `trial_sample_report_viewed` | Sample report viewed | same | `feature` (`social_listening`, `campaign`) |
++
++The frontend bridge whitelist (backend, users.controller.ts:2382): prefixes
++`trial_upgrade_`, `trial_book_call_`, `trial_unlock_modal_`,
++`trial_sample_report_` + regex `^[a-z][a-z0-9_]{0,63}$`. Guarded client-side
++to trial users only (trial-gating.service.ts:49); errors swallowed both sides.
++
++## 6. Sales/CRM mirror events (in imai_events but NOT emitted by the platform)
++
++Close pipeline stage labels are mirrored INTO imai_events as events:
++`Qualification`, `Discovery / Demo`, `Proposal / Buying`, `Won`,
++`Won (Renewed/Expanded)`, `Lost`, `Identification`, `No Show`, plus
++`scheduled_demo_*` / `scheduled_*_call` families.
++
++⚠ Exclude from product-usage analyses. ⚠ Stage names exist in BOTH Close
++pipelines (Sales + CS) — ambiguous without `status_id` (SCHEMA.md has the
++disambiguation ids). Mirror mechanism unknown — Q6.
++
++## 7. Orphan events (seen in imai_events/Klaviyo; no emitter anywhere in repo)
++
++`high_value_signup` · `scheduled_demo_*` · `scheduled_ai_agent_call*` (incl.
++per-rep variants) — presumed Close automations / make.com / Calendly ([Q6]).
++Document-blocked until the emitter is found.
++
++## 8. Validation status
++
++Code-derived only. Pending Q14 (logs-DB read access):
++per-event 90-day volumes, payload fill rates, dead-event detection, and
++discovery of any event names in imai_events not covered above.
+diff --git a/docs/events-audit/03-emitters.md b/docs/events-audit/03-emitters.md
+new file mode 100644
+index 00000000..e3799ab7
+--- /dev/null
++++ b/docs/events-audit/03-emitters.md
+@@ -0,0 +1,99 @@
++# 03 — Event Emitters & Side Channels (Sprint 2)
++
++**Status:** Draft v1 — code audit 2026-07-20.
++Companion to [02-event-dictionary.md](./02-event-dictionary.md) (what fires)
++— this doc covers **how** it fires and every parallel channel.
++
++---
++
++## 1. The three `sendPipeDriveWebhook` implementations
++
++Despite the name, all three POST to the **Close** webhook
++(`CLOSE_WEBHOOK_URL`); "PipeDrive" is a legacy misnomer. All are
++fire-and-forget with swallowed errors: **event delivery is best-effort by
++design, with no retry, queue, or dead-letter anywhere.** Every known
++downstream loss (Mixpanel gaps, Klaviyo ~10% list misses, April-2026 payment
++thin patch) is consistent with this.
++
++| | backend/main | proxy | social-listening |
++|---|---|---|---|
++| Location | users/services/users.service.ts:3729 | proxy/index.js:112 | src/users/social-listening-users.service.ts:36 |
++| Language | TS (NestJS) | JS (Express) | TS (NestJS) |
++| **Prod-gated** | ✅ `NODE_ENV==='prod'` | ❌ **fires from any env** (Q10; e2e dead-ends it, stack-env.ts:119) | ✅ `NODE_ENV==='prod'` |
++| Payload enrichment | looks up user → adds `name`, `email`, `main_user_id` | caller passes `email/user_id/name` explicitly | caller passes payload; keys snake_cased |
++| White-label routing | ✅ `CLOSE_WEBHOOK_URL_<LABEL>` (label ≠ 'imai'), falls back to default | ✅ same, via DB label lookup; strips `whiteLabelId` key | ❌ default URL only |
++| White-label identity in payload | ❌ stripped | ❌ stripped | n/a |
++| Retry / queue | none | none | none |
++| Type contract | `PipeDriveData` — defined TWICE (users.service.ts:75 vs user.interface.ts:49, drift risk) | none (plain object) | none |
++
++**Consequences to document for consumers:**
++- Events from white-label tenants either go to a different webhook URL
++  (per-label env var) or fall through to the default **indistinguishably**
++  — imai_events has no white-label field (SCHEMA.md flags reseller
++  invisibility as a known analytics gap). Remediation candidate: Sprint 5.
++- A user lookup failure in backend/main still sends the un-enriched event
++  (logged `PIPEDRIVE_WEBHOOK: user not found`) — expect occasional events
++  with missing `email`/`name`.
++
++## 2. The frontend→backend trial-event bridge
++
++`front/imai/src/app/core/services/trial-gating.service.ts:49`
++→ `POST /data/pipedrive/trial-event` → users.controller.ts:2382
++→ `sendTrialIntentEvent` (users.service.ts:1730) → webhook.
++
++Contract: trial users only (client-side guard); event name whitelisted by
++prefix (`trial_upgrade_`, `trial_book_call_`, `trial_unlock_modal_`,
++`trial_sample_report_`) + `^[a-z][a-z0-9_]{0,63}$`; payload `{source?,
++feature?}`; errors swallowed on both ends. This is the ONLY path where the
++client chooses a server event name.
++
++Server-side trial-friction events (limit-reached family) are emitted directly
++by quota enforcement with a **once-per-user-per-event-per-day cache**
++(users.service.ts:1652) — volumes are floor-counts of affected users/days,
++not raw click counts.
++
++## 3. Parallel usage record: proxy billing (DB-side, not events)
++
++The proxy independently records **all API usage** to Postgres on every
++proxied response (`onProxyRes`, proxy/index.js:327-497): `insertBillingEntity`
++(JWT + API-key users), `decrementUserBalanceByApiKey`,
++`insertMannyBillingEntity` (cron/reports path), `incrementSubscriptionCount`
++(paginated search) — keyed by `x-tokens-cost` header with per-route cost
++floors. Package types: 1=Search, 2=Reports, 4=Social Listening, 6=Overlap.
++
++This is a **second source of truth for usage** that never passes through the
++event pipeline — useful for cross-validating imai_events search counts
++(Sprint 4) and unaffected by webhook loss.
++
++## 4. Side channels (complete outbound map)
++
++| Channel | Destination | Trigger / payload | Gated? | Notes |
++|---|---|---|---|---|
++| GA4 Measurement Protocol | `google-analytics.com/mp/collect`, property `G-TD1DHH379G` | server-side `purchase` on `savePaidPayment` when price ∈ {99, 499, 1200} (payments.service.ts:1798) | ❌ | Hardcoded api_secret + client_id; bypasses webhook pipeline entirely. Q11. |
++| make.com — cancellation | `CANCELLATION_WEBHOOK_URL` | rich cancel payload: reason, competitor, message, subscription_amount… (users.service.ts:2262) | via env | Parallel to the `cancel_*` events. |
++| make.com — email test | hardcoded `hook.us1.make.com/ghqua…` | email-connection failure `{error, email_address}` (users.service.ts:3816) | ❌ | |
++| Slack — quota blocks | hardcoded hook (B04570374LR) | ~10 call sites, block notices (users.service.ts:3242-3551) | ❌ | |
++| Slack — cancellations | hardcoded hook (B074EJ23NJW) | `sendCancelSubscriptionSlack` (users.service.ts:3879) | | |
++| Slack — bad-card trials | hardcoded hook (B052AN3HQL8) | alongside `free_trial_blocked` (payments.service.ts:1539) | | |
++| Slack — mail failures | hardcoded hook (B04570374LR) | mail.service.ts:614, users.service.ts:2644 | | |
++| Slack — deploys | hardcoded hook (B06T9CAC0P5) | deploy announcements (deploy/deploy.js:63) | | |
++| Bubble — IP capture | `api.influencermarketing.ai/…/imai-ip-capture` (hardcoded bearer) | `{event: login\|signup, user_id, ip}` (users.service.ts:3845; called :1208, :3049, :4764) | ✅ prod | Feeds ip-based attribution? (relates to attribution sheet `ip` column). |
++| Bubble — blocked signup | `…/blocked-signup` | `{ip, email}` (users.service.ts:3864) | | |
++| Bubble — report errors | `…/imai-report-error` | Influencer.service.ts:631 | | |
++| Bubble — generic ("Robby") | `…/imai-webhooks` | `sendWebhook` users.service.ts:3704 — **no caller in repo** (dead?) | | |
++| Email-notification (dormant) | `BACKEND_API_URL/email-notification` | proxy `check24Usage` — only caller is commented out (index.js:318) | | Dead code. |
++| brand-safety → main | `MAIN_BACKEND_URL/brand-safety-report/:id/complete` | service-to-service callback | | Not analytics. |
++| `ai_usage` table | Postgres | AI token/cost logging from BOTH backend/main (`src/ai-usage/`) and brand-safety (`services/ai-usage.service.js`); `event` column = category label (`audio_transcription`, `video_analysis`, …) | | Internal cost accounting, not behavioral analytics. |
++| SL observability | GCP logs | pino `SL_EVENTS` (`segment.create.*`, `quota.*`, dotted names) → log-based metrics | | Not analytics; different naming convention (dotted vs snake_case). |
++
++## 5. Hardening candidates (feed Sprint 5 backlog)
++
++1. Single shared emitter contract: typed event-name union + one payload
++   interface; kills the duplicated `PipeDriveData` and the three divergent
++   implementations.
++2. Prod-gate the proxy emitter (Q10) and the GA4 MP call (Q11).
++3. Move hardcoded secrets (Slack hooks, Bubble bearer, GA4 api_secret) to env.
++4. Add `white_label` to payloads instead of stripping identity (Q13).
++5. Consider at-least-once delivery (outbox table or queue) if downstream loss
++   (Mixpanel/Klaviyo) turns out to matter — measure first in Sprint 4.
++6. CI guardrail: fail when a new event name isn't in 02-event-dictionary.md.
+diff --git a/docs/events-audit/OPEN_QUESTIONS.md b/docs/events-audit/OPEN_QUESTIONS.md
+new file mode 100644
+index 00000000..d4430b29
+--- /dev/null
++++ b/docs/events-audit/OPEN_QUESTIONS.md
+@@ -0,0 +1,72 @@
++# Events Audit — Open Questions Register
++
++A living list. Questions get an ID and are **never deleted** — when answered,
++the status flips and the answer (with evidence) is recorded inline, so the
++reasoning trail survives. Add new questions at the bottom of the relevant
++section with the next free ID.
++
++**Statuses:** `OPEN` · `ANSWERED` · `PARTIAL` · `WONT-ANSWER` (with reason)
++
++---
++
++## How to answer the top blockers (cheat sheet)
++
++- **Q1** is a one-minute job for anyone with SSH to `discovery-prod`
++  (GCP project "Leaders Prod" → Compute Engine):
++  `grep -h "WEBHOOK" ~/Discovery-imai/backend/main/.env ~/Discovery-imai/proxy/.env ~/Discovery-imai/backend/social-listening/.env`
++- **Q2/Q3** need AWS console access (whoever owns the eu-central-1 account).
++- **Q6** needs a Close login for IMAI's Close org (not NewVoices).
++
++---
++
++## A. Pipeline infrastructure (Sprint 1)
++
++| ID | Question | Why it matters | How to answer | Status |
++|----|----------|----------------|---------------|--------|
++| Q1 | What URL is in `CLOSE_WEBHOOK_URL` (and every `CLOSE_WEBHOOK_URL_<LABEL>`, `CANCELLATION_WEBHOOK_URL`) in prod? | Identifies the receiver of ALL named server events — decides whether the Mixpanel/Klaviyo/Close fan-out is AWS, make.com, or something else. Single highest-leverage unknown. | SSH to `discovery-prod`, grep the three services' `.env` files (see cheat sheet). | OPEN |
++| Q2 | What Lambda(s)/integrations sit behind API Gateways `d-gnyi890n7g` (t.imai.co) and `47dwgl20q6` (eu-central-1), and what do they write to? | Confirms the AWS ingestion path into the logs DB; locates the pixel-collector source code. | AWS console → API Gateway (eu-central-1) → integrations; check Lambda env vars for DB targets. | OPEN |
++| Q3 | Where does the logs/"pixel" Postgres DB run (AWS RDS? GCP? a VM?), and who owns it? | Retention/backup/access policy for the canonical event store; needed before Sprint 4 data-quality work. | AWS/GCP console, or resolve the host in `USAGE_AI_LOGS_DB_URL` from prod env. | OPEN |
++| Q4 | What job syncs `imai_events` → Mixpanel, on what schedule, and what sets `user.mixpanel_sync` (prod user table)? | The entire "events → Mixpanel" documentation depends on it; explains the known lag/loss. | Likely visible from AWS console (Q2) or from whoever administers Mixpanel; also check make.com scenarios. | OPEN |
++| Q5 | What mechanism mirrors events into Klaviyo (7 metrics + ~97 event-named lists), and why does ~1 in 10 events reach neither list? | Klaviyo flows are the lifecycle-email automation bus; the loss rate affects email targeting. | Klaviyo admin → integrations/API logs; or answered implicitly by Q1. | OPEN |
++| Q6 | Which system emits the orphan events `high_value_signup`, `scheduled_demo_*`, `scheduled_ai_agent_call*` (found in imai_events/Klaviyo, no emitter in repo)? | Without the emitter these events can't be documented or trusted; likely Close automations, make.com, or Calendly webhooks. | IMAI Close org (⚠ the session's Close connector reaches the NewVoices org, not IMAI's) + make.com account. | OPEN |
++| Q7 | Are there GitHub repos this integration can't see that hold the pixel-collector / webhook-receiver / Mixpanel-sync code? | Reading the code beats console reverse-engineering. Only `Discovery-imai` is visible today. | GitHub org owner lists org repos; grant integration read access to any pipeline repo. | OPEN |
++| Q8 | What are `backend/scraper` and `backend/frontend-logger` (referenced by deploy/deploy.js, present on the prod VM, absent from the repo)? Does frontend-logger receive the frontend `/logger/log` error events? | Two running services outside version control; frontend-logger is plausibly part of the logging/eventing picture. | Look on `discovery-prod` VM (`~/Discovery-imai/backend/scraper`, `backend/frontend-logger`); consider committing them. | OPEN |
++
++## B. Event semantics & taxonomy (Sprint 2)
++
++| ID | Question | Why it matters | How to answer | Status |
++|----|----------|----------------|---------------|--------|
++| Q9 | `created_campaign` AND `campaign_created` both fire on campaign creation (campaigns.controller.ts:339, :356). Intentional or a bug? Which do downstream consumers key on? | Double-counting risk in Mixpanel/Klaviyo funnels; taxonomy cleanup candidate. | Check imai_events volumes for both names (needs logs DB, Q3) + ask whoever built the Close/Klaviyo automations. | OPEN |
++| Q10 | Is the proxy emitter's missing NODE_ENV gate intentional? (proxy/index.js:112 fires `influencer_discovery_search` from ANY environment; e2e must dead-end it.) | Staging/dev could pollute imai_events/Mixpanel search counts. | Ask platform team; likely fix = add the same prod gate as backend/main. | OPEN |
++| Q11 | The GA4 Measurement Protocol `purchase` call (payments.service.ts:1798) is not prod-gated, uses a hardcoded `client_id` and api_secret, and only fires for prices {99, 499, 1200}. Intentional scope? Which report consumes it? | Wrong/no gating pollutes GA4 revenue; hardcoded client_id breaks GA4 user attribution; price allowlist silently drops other plans. | Ask marketing (Ron?) what depends on GA4 purchase events; check GA4 property. | OPEN |
++| Q12 | Who consumes the `email`/`name` enrichment on webhook events, and is PII in the event stream (email, ip in imai_events; email in GTM dataLayer/Clarity) reviewed for GDPR/consent? | Compliance + informs whether payloads can be slimmed. | Product/legal review; part of Sprint 3 task 4. | OPEN |
++| Q13 | White-label events: emitters strip `whiteLabelId` and some labels route to `CLOSE_WEBHOOK_URL_<LABEL>` — where do those go, and should white-label traffic be tagged rather than stripped? | Reseller traffic is best-effort-invisible in analytics today (known gap in SCHEMA.md). | Q1 answers the routing; tagging is a Sprint 5 remediation proposal. | OPEN |
++| Q14 | 30/90-day volume + payload fill-rate per event to validate the dictionary (which documented events are dead? any undocumented events in imai_events not covered?). | Turns the code-derived dictionary into a verified one; Sprint 2 exit criterion. | Read-only logs-DB access (Q3): `SELECT event, count(*) FROM imai_events WHERE date >= current_date - 90 GROUP BY 1 ORDER BY 2 DESC`. | OPEN |
++
++## C. Client-side & marketing tags (Sprint 3)
++
++| ID | Question | Why it matters | How to answer | Status |
++|----|----------|----------------|---------------|--------|
++| Q15 | What tags live inside GTM containers `GTM-PBZ6TBF` and `GTM-5TRH876J` ("LEADERS"), and is the second container intentional? | The dataLayer events are only half the story — GTM decides what actually fires where; dual containers double-fire risk. | GTM admin access → export both container configs. | OPEN |
++| Q16 | Is the Segment ("PRophet") integration (write key `sW20Nx…`, identify-only, no track calls) still in use, and what workspace consumes it? | Dead tag = remove; live tag = document destination. | Segment workspace admin. | OPEN |
++| Q17 | Why does the OLD AWS pixel fire on trial activation + influencer search specifically (home.component.ts:116, influencers.component.ts:351)? What does its collector store, keyed how? | These are the highest-value funnel moments; their data feeds attribution (gclid capture) but the storage schema is unknown. | Q2 (Lambda code) or logs-DB inspection (Q3). | OPEN |
++| Q18 | VWO account 1044481 — active experiments? Clarity project `kaw00ybizl` — retention settings and who reviews recordings? | Complete the marketing-tag inventory (Sprint 3). | VWO/Clarity admin logins. | OPEN |
++
++## D. Destinations (Sprint 4 — will grow)
++
++| ID | Question | Why it matters | How to answer | Status |
++|----|----------|----------------|---------------|--------|
++| Q19 | Mixpanel: full event/property inventory, identity-resolution rules (user_id vs email vs main_user_id), measured sync lag & loss per event. | Core Sprint 4 deliverable; today "lossy + lagging" is anecdotal. | Mixpanel project admin (Lexicon + raw export API). | OPEN |
++| Q20 | Which Mixpanel reports/boards does the team actually use (health score is replicated in-code at usage-board.service.ts:1909 — what else)? | Tells us which events MUST stay stable through any taxonomy cleanup. | Ask Mixpanel users (product/CS); Mixpanel usage report. | OPEN |
++
++---
++
++## Answered
++
++(move rows here with the answer + evidence when resolved)
++
++| ID | Question | Answer | Evidence | Date |
++|----|----------|--------|----------|------|
++| Q-A1 | Is `t.imai.co` AWS? | Yes — API Gateway custom domain `d-gnyi890n7g.execute-api.eu-central-1.amazonaws.com`. | DNS probe 2026-07-20 (01-architecture.md §2). | 2026-07-20 |
++| Q-A2 | Does anything in the codebase write to Mixpanel or AWS directly? | No — Mixpanel only via external sync; AWS only the pixel collector + S3 script bucket. | Repo-wide sweeps (EVENTS_AUDIT_PLAN.md Part 1). | 2026-07-20 |
++| Q-A3 | Where does the platform itself run? | GCP end-to-end: GCE `discovery-prod`/`discovery-stag` ("Leaders Prod"), Cloud Run campaign-tracker, GCS storage; Bubble behind Cloudflare for `api.influencermarketing.ai`. | deploy/readme.md + DNS probes. | 2026-07-20 |
+-- 
+2.43.0
+

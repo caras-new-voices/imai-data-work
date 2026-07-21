@@ -1,0 +1,827 @@
+From c3dac92b25056dc08c3cf5ee565420e9a6662494 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 20 Jul 2026 16:36:16 +0000
+Subject: [PATCH 4/7] =?UTF-8?q?docs:=20Sprints=203-5=20=E2=80=94=20fronten?=
+ =?UTF-8?q?d/pixel=20docs,=20destination=20+=20data-quality=20playbooks,?=
+ =?UTF-8?q?=20tracking=20plan,=20remediation=20backlog,=20overview?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- 04-frontend-analytics.md: client tag inventory, GTM/GA4/Clarity/Segment
+  events, client<->server cross-map, PII findings
+- 05-gtm-containers.md: blocked-on-access container audit with ready
+  completion procedure
+- 06-conversion-pixel.md: customer conversion SDK (sdk/pixel.js verified),
+  Shopify/Woo plugins, attribution chain, three-pixels disambiguation
+- 07-destinations.md: Mixpanel/Klaviyo/Close/GA4 knowns + coverage matrix
+- 08-data-quality.md: ready-to-run SQL validation playbook for when
+  logs-DB access arrives
+- 09-tracking-plan.md: taxonomy proposal, keep/rename/deprecate map,
+  missing-event gap list, governance
+- 10-gaps-and-remediation.md: sequenced backlog R1-R22
+- 00-overview.md: executive summary + index
+- OPEN_QUESTIONS.md: +Q21; plan status updated
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XUduGDBwL4mE8PagCqcPMY
+---
+ docs/events-audit/00-overview.md             |  61 ++++++++
+ docs/events-audit/04-frontend-analytics.md   | 109 ++++++++++++++
+ docs/events-audit/05-gtm-containers.md       |  55 +++++++
+ docs/events-audit/06-conversion-pixel.md     |  91 ++++++++++++
+ docs/events-audit/07-destinations.md         | 116 +++++++++++++++
+ docs/events-audit/08-data-quality.md         | 143 +++++++++++++++++++
+ docs/events-audit/09-tracking-plan.md        |  70 +++++++++
+ docs/events-audit/10-gaps-and-remediation.md |  50 +++++++
+ docs/events-audit/EVENTS_AUDIT_PLAN.md       |   6 +-
+ docs/events-audit/OPEN_QUESTIONS.md          |   6 +
+ 10 files changed, 706 insertions(+), 1 deletion(-)
+ create mode 100644 docs/events-audit/00-overview.md
+ create mode 100644 docs/events-audit/04-frontend-analytics.md
+ create mode 100644 docs/events-audit/05-gtm-containers.md
+ create mode 100644 docs/events-audit/06-conversion-pixel.md
+ create mode 100644 docs/events-audit/07-destinations.md
+ create mode 100644 docs/events-audit/08-data-quality.md
+ create mode 100644 docs/events-audit/09-tracking-plan.md
+ create mode 100644 docs/events-audit/10-gaps-and-remediation.md
+
+diff --git a/docs/events-audit/00-overview.md b/docs/events-audit/00-overview.md
+new file mode 100644
+index 00000000..40646dd2
+--- /dev/null
++++ b/docs/events-audit/00-overview.md
+@@ -0,0 +1,61 @@
++# Events & Analytics Documentation — Overview
++
++**Audit executed 2026-07-20** (code + live probes). This folder is the
++authoritative documentation of how user-behavior events are produced,
++transported, and consumed across the IMAI platform — and the living plan to
++finish the parts that require external access.
++
++## Read this first: the system in five sentences
++
++1. Three server emitters (backend/main, proxy, social-listening) POST
++   ~55 named events + 4 dynamic families to an env-configured webhook
++   (`CLOSE_WEBHOOK_URL`) — fire-and-forget, no retries.
++2. An **external pipeline (not in this repo)** fans those events into the
++   logs/"pixel" Postgres (`imai_events`, ~4.6M rows), **Mixpanel** (lossy,
++   lagging sync), **Klaviyo** (metrics + ~97 event-named lists driving all
++   lifecycle email), and **Close CRM**.
++3. The **AWS leg** is a legacy page-visit pixel: `t.imai.co` = AWS API
++   Gateway (eu-central-1); it fires at trial activation + influencer search
++   and captures URL + UTM/gclid (the attribution feed). Everything else
++   runs on **Google Cloud**.
++4. The frontend separately runs GTM ×2, GA4, Clarity, Segment and VWO, plus
++   a whitelisted bridge that lets trial-friction clicks become server events.
++5. A completely separate **customer conversion pixel** (sdk/pixel.js →
++   `/tracking/*` → campaign tables) measures IMAI clients' store purchases —
++   do not confuse the two "pixels".
++
++## Document index
++
++| Doc | Contents | State |
++|---|---|---|
++| [EVENTS_AUDIT_PLAN.md](./EVENTS_AUDIT_PLAN.md) | Original audit findings + sprint plan | reference |
++| [OPEN_QUESTIONS.md](./OPEN_QUESTIONS.md) | **Living question register (Q1–Q21)** — add here, never delete | live |
++| [01-architecture.md](./01-architecture.md) | End-to-end pipeline, live-probe evidence, access requests | done to access limit |
++| [02-event-dictionary.md](./02-event-dictionary.md) | Canonical event catalog (server-side) | done; volumes pending Q14 |
++| [03-emitters.md](./03-emitters.md) | The 3 emitter implementations, bridges, side channels | done |
++| [04-frontend-analytics.md](./04-frontend-analytics.md) | Client tags, GTM/GA4/Clarity/Segment, client↔server map, PII | done; GTM internals pending Q15 |
++| [05-gtm-containers.md](./05-gtm-containers.md) | GTM container audit | blocked (Q15) — procedure ready |
++| [06-conversion-pixel.md](./06-conversion-pixel.md) | Customer conversion SDK/plugins/attribution | done |
++| [07-destinations.md](./07-destinations.md) | Mixpanel/Klaviyo/Close/GA4 + coverage matrix | knowns done; audits pending Q5/Q19 |
++| [08-data-quality.md](./08-data-quality.md) | Ready-to-run SQL validation playbook | ready — needs logs-DB access (Q3) |
++| [09-tracking-plan.md](./09-tracking-plan.md) | Taxonomy proposal, keep/rename map, missing events | proposal — needs review |
++| [10-gaps-and-remediation.md](./10-gaps-and-remediation.md) | Ticket-ready backlog R1–R22, sequenced | ready |
++
++## What we can and cannot answer today
++
++**Answerable now (from these docs):** what fires on any user action and from
++where; what each event's payload and caveats are; which tool can be trusted
++for which question (07 §5 coverage matrix); where the AWS and GCP pieces
++live; every known data-loss mode and its workaround.
++
++**Blocked (all itemized in OPEN_QUESTIONS.md):** the webhook receiver's
++identity (Q1 — one grep on the prod VM), the Lambda/logs-DB internals (Q2/Q3),
++the Mixpanel sync mechanics and workspace inventory (Q4/Q19), Klaviyo's
++pusher (Q5), the orphan events' emitter (Q6), and GTM container contents (Q15).
++
++## Operating model
++
++Progress does not stop on blocked items: questions accumulate in the
++register with exact answering procedures; each answer unblocks a marked
++section of a doc. Engineering fixes are pre-sequenced in
++10-gaps-and-remediation.md (batch 1 has no dependencies at all).
+diff --git a/docs/events-audit/04-frontend-analytics.md b/docs/events-audit/04-frontend-analytics.md
+new file mode 100644
+index 00000000..f87681ac
+--- /dev/null
++++ b/docs/events-audit/04-frontend-analytics.md
+@@ -0,0 +1,109 @@
++# 04 — Frontend Analytics & Marketing Tags (Sprint 3)
++
++**Status:** Draft v1 — code audit 2026-07-20. GTM container internals pending
++access ([Q15](./OPEN_QUESTIONS.md)); see [05-gtm-containers.md](./05-gtm-containers.md).
++
++The Angular app (`front/imai`) runs **four independent client tracking layers**
++plus Sentry (errors), VWO (A/B), and two first-party bridges to the backend.
++All of these fire for **every white-label domain**, not just imai.co (Q12/Q15).
++
++---
++
++## 1. Layer inventory
++
++| Layer | ID / key | Loaded from | Purpose |
++|---|---|---|---|
++| GTM container #1 | `GTM-PBZ6TBF` | index.html:26 | Tag orchestration (contents unknown — Q15) |
++| GTM container #2 "LEADERS" | `GTM-5TRH876J` | index.html:40 | Second container, purpose unconfirmed (Q15) |
++| Google Ads gtag | `AW-17928663214` | index.html:17 | Ads conversion tagging |
++| GA4 via `ngx-google-analytics` | prod `G-TD1DHH379G` / dev `G-B1VM71MJ2V` | main.ts:198 (`environment.ga`) | Product funnel events |
++| Microsoft Clarity | `kaw00ybizl` | runtime-injected by `AnalyticsService.init()` (app.component.ts:57); skipped on localhost | Session recording + custom tags |
++| Segment ("PRophet Tag Manager") | write key `sW20Nx1r1a8BQcqQiHQdGSsSichtOjoE` | index.html:54 | identify-only (no track calls found) — Q16 |
++| VWO | account `1044481` | main.ts:153 — **only when domain label === 'imai'** | A/B testing |
++| Sentry | DSN in environment.prod.ts | main.ts:54 | Error monitoring (not analytics) |
++| AWS visit pixel (OLD) | `t.imai.co` (API GW eu-central-1) | injected at trial activation (home.component.ts:116) + influencer search (influencers.component.ts:351) | Page-visit/attribution beacon → logs DB (see 01-architecture.md §1[B]) |
++
++## 2. GTM dataLayer events (`GtmService.pushEvent`)
++
++Only **four** call sites exist (gtm.service.ts:5 pushes `{event, ...data}`):
++
++| Event | Where | Payload | Notes |
++|---|---|---|---|
++| `successful_signup` | registration.component.ts:106 (google), :435 (email) | `method`, `email` | ⚠ raw email into dataLayer (Enhanced Conversions per code comment) |
++| `successful_trial_started` | credit-card.component.ts:261 | `user_id`, `transaction_id` (=user_id string), `value` (price), `currency:'USD'`, `email` | `transaction_id` doubles as dedup key vs a "server-side leg" (= the GA4 MP purchase? unconfirmed — Q11) |
++| `successful_onboarding_completed` | onboarding.component.ts:412 | `user_id` | |
++
++## 3. GA4 events (`$gaService.event`, co-fired with the funnel)
++
++| GA event | Where | Category/label |
++|---|---|---|
++| `begin_checkout` | credit-card.component.ts:159 | payments / Trial checkout started |
++| `credit_card_modified` | credit-card.component.ts:245; redirect.component.ts:29 | payments |
++| `trial_success` | credit-card.component.ts:260; onboarding.component.ts:411 | payments / Subscribed to Free Trial |
++| `payment_success` | credit-card.component.ts:269 (with price); redirect.component.ts:34 | payments |
++| `credit_card_error` | credit-card.component.ts:350 | payments / error text |
++| `payment_failure` | redirect.component.ts:43 | payments |
++| `manual_upgrade_intercom` | packages.component.ts:143 | packages |
++| `upgrade_package` | packages.component.ts:168 | packages / packageId |
++| `google_signup` / `signup` | registration.component.ts:105 / :434 | registration |
++| `email_verified` | registration.component.ts:462 | registration |
++
++Plus the **server-side** GA4 Measurement Protocol `purchase`
++(backend, payments.service.ts:1798 — see 03-emitters.md §4, Q11).
++
++## 4. Microsoft Clarity custom tags (`AnalyticsService`)
++
++`identify()` sends **email only** (the userId param is ignored — user-id
++segmentation unavailable in Clarity today). `track(key, value)` maps to
++`clarity('set', key, value)`, default value `'true'`.
++
++| Tag | Where |
++|---|---|
++| identify(email) | authentication.service.ts:128; app.component.ts:141 |
++| `Payment Success` | credit-card.component.ts:255; redirect.component.ts:33 |
++| `New Signup` | registration.component.ts:86 |
++| `Subscription Page` = JSON `{email, name, packageId, isDemo, hasActiveSubscription}` | packages.component.ts:109 |
++| `Hype Search` | influencers.component.ts:605 |
++
++## 5. Segment / "PRophet"
++
++Loaded for all domains; the ONLY call is
++`window['analytics'].identify(userEmail, {userId})`
++(app.component.ts:114, invoked from refreshData :149). No `track()` calls
++anywhere. Either a dormant integration or purely an identity feed for an
++external "PRophet" tool — Q16.
++
++## 6. First-party bridges (client → backend)
++
++| Bridge | Endpoint | What |
++|---|---|---|
++| Trial-friction events | `POST /data/pipedrive/trial-event` (trial-gating.service.ts:53) | See 02-event-dictionary.md §5 and 03-emitters.md §2 — the client picks whitelisted server event names (`trial_upgrade_<placement>`, `trial_unlock_modal_opened`, `trial_book_call_*`, `trial_sample_report_viewed`). |
++| Client error log | `POST /logger/log` (error-logging.service.ts:10) | Errors only (message/stack/userId); gated by `environment.enableLogger`; receiver is the server-only `frontend-logger` service (Q8). Not analytics. |
++
++Note: `GET /data/log` (users.service.ts:233) is the in-app notification feed
++— despite the name it is NOT event tracking.
++
++## 7. Client ↔ server cross-map (the same user action, all destinations)
++
++| User action | Client fires | Server fires | Dedup/consistency risk |
++|---|---|---|---|
++| Signup | GTM `successful_signup` (+email) · GA4 `signup`/`google_signup` · Clarity `New Signup` | webhook `signup` (+utm, phone) → E/M/K/C · Bubble ip-capture | Different names per tool; no shared id — cross-tool joins only by user_id/email. |
++| Trial start | GTM `successful_trial_started` (transaction_id = user_id) · GA4 `trial_success` | webhook `new_subscription_trial` (+amount) · AWS visit pixel fires on the post-trial redirect (`?u=1`) | `transaction_id` dedup contract with the "server-side leg" unconfirmed (Q11). |
++| First payment / renewal | GA4 `payment_success` (client) | webhook `new_subscription_payment` / `payment_success` · GA4 MP `purchase` (server, only prices 99/499/1200) | GA4 receives BOTH a client event and a server MP purchase — double-count risk inside GA4 (Q11). |
++| Upgrade | GA4 `upgrade_package` | webhook `upgrade_package_payment` | |
++| Onboarding done | GTM `successful_onboarding_completed` · GA4 `trial_success` (also fired here!) | webhook `finished_onboarding` | GA4 `trial_success` fires on BOTH credit-card and onboarding paths — inflates trial counts in GA4. |
++| Search | — (Clarity `Hype Search` only for hype path) | proxy webhook `influencer_discovery_search` (+ AWS visit pixel on the search page) | |
++| Trial friction | (UI only) | webhook trial_* via bridge | Client guard = trial users only; events deduped server-side once/day for limit family only. |
++
++## 8. PII & white-label findings (input to Sprint 5)
++
++1. **Raw email** goes into: GTM dataLayer (2 events), Clarity identify +
++   `Subscription Page` tag, Segment identify, webhook events (by design),
++   imai_events (stored), plus `ip` in imai_events and Bubble ip-capture.
++2. **All ~50 white-label domains load IMAI's tags** (GTM ×2, GA4, Clarity,
++   Segment; VWO is imai-only) — tenant users are tracked in IMAI's
++   marketing tools. Their server events may route to per-label webhooks but
++   client-side everything lands in IMAI properties (Q12, Q13, Q15).
++3. Consent management: **none found in code** — no consent banner/CMP gating
++   any tag. (If a CMP is injected via GTM, only the container export shows it
++   — Q15.)
+diff --git a/docs/events-audit/05-gtm-containers.md b/docs/events-audit/05-gtm-containers.md
+new file mode 100644
+index 00000000..1d32a37c
+--- /dev/null
++++ b/docs/events-audit/05-gtm-containers.md
+@@ -0,0 +1,55 @@
++# 05 — GTM Container Audit (Sprint 3)
++
++**Status:** BLOCKED on GTM admin access ([Q15](./OPEN_QUESTIONS.md)) — this
++doc records what is knowable from code and the exact procedure to finish it.
++
++## What we know without access
++
++| | Container 1 | Container 2 |
++|---|---|---|
++| ID | `GTM-PBZ6TBF` | `GTM-5TRH876J` |
++| Loaded | index.html:26 (+ noscript :135) | index.html:40 (+ noscript :141), commented "LEADERS" |
++| Scope | every page, every domain (incl. white-labels) | same |
++
++Both consume the same `dataLayer`, which receives exactly three event names
++from code (`successful_signup`, `successful_trial_started`,
++`successful_onboarding_completed` — see 04 §2) plus whatever GTM itself
++derives (page views, clicks, scroll triggers we cannot see from here).
++
++Also in the page, outside GTM: gtag.js `AW-17928663214` (Google Ads),
++GA4 `G-TD1DHH379G` via ngx-google-analytics, Clarity, Segment, VWO — so GTM
++is NOT the single tag manager; any audit must reconcile duplicates between
++in-code tags and GTM-injected tags (e.g. a second GA4/Ads tag inside GTM
++would double-fire conversions).
++
++"LEADERS" matches the GCP project name ("Leaders Prod") — the containers may
++be split company-entity vs product, or one may be legacy. Unconfirmed.
++
++## Completion procedure (30–60 min once someone has GTM access)
++
++1. GTM → each container → **Export container** (Admin → Export) — attach the
++   two JSON exports next to this doc (`gtm-PBZ6TBF.json`, `gtm-5TRH876J.json`).
++2. For each container, fill the tables below from the export:
++   - Tags: name, type (GA4/Ads/pixel/custom HTML), firing triggers, consumed
++     dataLayer variables.
++   - Triggers: which of the 3 code events are used; any all-pages/history
++     triggers.
++   - Custom HTML tags: full inventory (this is where surprise third parties
++     hide — TikTok/Meta/LinkedIn pixels, CMPs, affiliate tags).
++3. Answer: does either container send `email` from the dataLayer to any tag
++   (Enhanced Conversions is the stated intent — confirm scope)?
++4. Answer: is `GTM-5TRH876J` still needed? Recommendation + owner.
++5. Update Q15 in OPEN_QUESTIONS.md with findings; fold conclusions into
++   04-frontend-analytics.md §7/§8.
++
++## Template to fill
++
++### Container GTM-PBZ6TBF
++| Tag | Type | Trigger(s) | Variables used | Sends PII? |
++|---|---|---|---|---|
++| _pending export_ | | | | |
++
++### Container GTM-5TRH876J ("LEADERS")
++| Tag | Type | Trigger(s) | Variables used | Sends PII? |
++|---|---|---|---|---|
++| _pending export_ | | | | |
+diff --git a/docs/events-audit/06-conversion-pixel.md b/docs/events-audit/06-conversion-pixel.md
+new file mode 100644
+index 00000000..3177eb2b
+--- /dev/null
++++ b/docs/events-audit/06-conversion-pixel.md
+@@ -0,0 +1,91 @@
++# 06 — Customer Conversion Pixel (Sprint 3)
++
++**Status:** Draft v1 — code audit 2026-07-20.
++
++This is the **customer-facing** system: IMAI's clients (brands) install it on
++THEIR e-commerce stores so influencer-driven purchases can be attributed to
++campaigns. It is completely separate from IMAI's own product analytics
++(02/03/04) — but shares the word "pixel" with the legacy AWS visit collector
++(01-architecture.md §1[B]) and the logs DB's nickname. **Three different
++things called "pixel":**
++
++| "Pixel" | What it is | Where data lands |
++|---|---|---|
++| Campaign conversion SDK (this doc) | `sdk/pixel.js` on customer stores | GCP backend → campaign tables (prod DB) |
++| Legacy AWS visit pixel | `t.imai.co` / S3 `pixel.js` (373 B) | AWS API GW → logs DB (presumed) |
++| "Pixel DB" | nickname for the logs Postgres (imai_events) | n/a |
++
++---
++
++## 1. Components
++
++- **`sdk/pixel.js`** (v1.0.0, in-repo) — the tracking SDK customers embed.
++  Served from `https://cdn.influencermarketing.ai/pixel.js` (GCP; see
++  WooCommerce plugin) — NOT from t.imai.co/S3 (those serve the legacy visit
++  beacon).
++- **`sdk/influencermarketing-pixel/`** — Shopify **web pixel extension**
++  (activated via Shopify OAuth + `webPixelCreate` GraphQL from the backend
++  tracking module).
++- **`sdk/plugins/imai-tracking-woocommerce/`** — WooCommerce plugin.
++- **Backend receiver** — `backend/main/src/tracking/` (controllers
++  `tracking.controller.ts`): public endpoints `POST /tracking/click`,
++  `/tracking/sdk-click`, `/tracking/conversion`, `/tracking/ping`, plus
++  Shopify OAuth/compliance webhooks. (Frontend-visible as `/data/tracking/*`.)
++- **Bubble legacy endpoints** — `api.influencermarketing.ai/api/1.1/wf/
++  order-conversion-shopify|woocommerce|eccommerce` (white-label:
++  `api.igrdr.com`) — the older webhook path still shown in the in-app
++  tutorial (conversionTutorial.component.ts:105-297) with copy-paste
++  snippets (JS/PHP/Node/Python/curl/Java/Dart/C#) posting `auth_code`,
++  `browser_ip`, `total_price`, `line_items`, `store_url`, `order_number`.
++- **Per-campaign toggle** — `POST /campaign/:id/pixel` (campaigns.controller.ts:1534)
++  flips `pixelActive`; UI requires `baseUrl`/domain + conversion value when
++  active (campaignDetails.component.ts:579-586).
++- **Domain allowlist** — `client_domains` table (`ClientDomain` entity):
++  only authorized domains may send tracking data.
++
++## 2. How the SDK works (sdk/pixel.js, verified by read)
++
++**Identity & capture:**
++- Click IDs arrive on the landing URL as `?imai_click_id=…` (set by IMAI's
++  link redirector) or are generated locally (`imai_<ts>_<rand>`) when only a
++  link shortcode `?imai_sc=…` is present.
++- Stored in a **first-party cookie `_imai_clickid`** (default 30 days;
++  overridable per-link via `?imai_cw=<N>d`, 1–365). Tracking params are
++  scrubbed from the URL afterwards (history.replaceState).
++- `?imai_env=local|stage` switches the API target (persisted in
++  localStorage) — dev/test backdoor to be aware of.
++
++**Calls to the backend:**
++| Call | When | Payload highlights |
++|---|---|---|
++| `POST …/ping` | every SDK load | `domain, sdkVersion, userId` — powers "is the pixel installed" checks |
++| `POST …/sdk-click` | when a shortcode is present | `clickId, landingUrl, referrer, linkShortcode, ip` (fetched from **api64.ipify.org** client-side!), browser/OS/device enrichment |
++| `POST …/conversion` | order completion (auto or manual `imaiTrackConversion(orderData)`) | `clickId, orderId, amount, currency, coupon, lineItems[], platform` + device data; or a `rawData` passthrough variant; optional `X-API-Key` |
++
++**Platform auto-detection:** shopify / woocommerce / magento / prestashop /
++bigcommerce (with DOM heuristics); auto-tracking implemented for Magento
++success pages and (partially) BigCommerce; Shopify handled by the web-pixel
++extension; WooCommerce by the plugin.
++
++## 3. Attribution chain (backend `AttributionService`)
++
++Priority: **clickId → coupon code → IP fallback (24h window)**.
++Conversions land in prod-DB campaign tables:
++`CampaignInfluencerClicks`, `CampaignInfluencerConversions`,
++`CampaignInfluencerConversionProducts` (registered cross-module from the
++tracking module — a documented anti-pattern to revisit).
++
++## 4. Findings / follow-ups
++
++1. **Client-side IP lookup via third party** (api64.ipify.org) adds latency,
++   a third-party dependency on customer stores, and PII flow — the server
++   sees the request IP anyway; candidate for removal (Sprint 5 backlog).
++2. **Two generations of conversion ingestion** (Bubble `wf/order-conversion-*`
++   vs `/tracking/conversion`) are both live in the tutorial UI — which is
++   canonical, and is the Bubble path still consumed? → added as **Q21**.
++3. **`?imai_env` backdoor** lets anyone point a store's SDK at staging —
++   harmless for customers but can silently blackhole real conversions if
++   left set; consider prod-build stripping.
++4. The Shopify compliance webhooks (GDPR endpoints) exist in
++   tracking.controller.ts — good; verify they're registered per app store
++   requirements when documenting the Shopify app (Sprint 5).
+diff --git a/docs/events-audit/07-destinations.md b/docs/events-audit/07-destinations.md
+new file mode 100644
+index 00000000..a42fb4f3
+--- /dev/null
++++ b/docs/events-audit/07-destinations.md
+@@ -0,0 +1,116 @@
++# 07 — Destinations: Mixpanel, Klaviyo, Close, GA4 (Sprint 4)
++
++**Status:** Draft v1 — everything below that is dated/verified comes from
++`backend/main/src/usage-ai/SCHEMA.md` (live-data-verified knowledge base) or
++this audit's code reads. Items marked 🔒 need access (Q-refs) and have a
++ready-to-run completion procedure.
++
++---
++
++## 1. Mixpanel
++
++**What we know:**
++- Populated ONLY by the external sync from the webhook/logs-DB pipeline —
++  no code in this repo writes to it (verified repo-wide).
++- Sync is **lagging and lossy** (SCHEMA.md calls drift vs live data "its sync
++  lag"); `user.mixpanel_sync` (int, prod user table, added Oct 2024) is
++  presumably a per-user sync watermark — writer unknown (Q4).
++- Event naming in Mixpanel does NOT always match imai_events: the health
++  score formula uses Mixpanel-style names (`'Influencer Search'`,
++  `'Added Influencer to List'`) alongside snake_case (`'influencer_discovery_search'`)
++  — SCHEMA.md keeps both lists verbatim "for parity with the Mixpanel sync".
++  A name-mapping table Mixpanel↔imai_events is REQUIRED output of this sprint.
++- The per-user **health score (0–100)** the team uses in Mixpanel is exactly
++  replicated in SQL at usage-board.service.ts:1909 (60-day window, recency
++  bucket + tiered usage; bands ≥80 Healthy / ≥60 Stable / ≥40 At Risk /
++  else Critical).
++
++**🔒 Completion procedure (Q19/Q20 — needs Mixpanel project admin):**
++1. Export Lexicon (events + properties + descriptions) → diff against
++   02-event-dictionary.md: (a) Mixpanel events with no dictionary entry,
++   (b) dictionary events absent from Mixpanel, (c) name variants → build the
++   mapping table.
++2. Identity audit: what is `distinct_id` (user_id? email?)? How are team
++   members / main_user_id handled? Any identity merge rules?
++3. Lag/loss measurement (30 days, top 10 events): count in imai_events vs
++   count in Mixpanel (raw export API), bucket by day; record median ingest
++   delay and loss % per event.
++4. Usage audit: which reports/boards/cohorts does the team actually open
++   (Mixpanel usage report)? Those events become "protected names" for the
++   Sprint 5 taxonomy.
++
++## 2. Klaviyo (verified 2026-07-13 in SCHEMA.md)
++
++- Account is young — nothing predates 2025-11.
++- **Two mirror mechanisms:**
++  1. **7 API-pushed lifecycle metrics** (with metric ids + birth dates):
++     `Signup` TgdFj8 (2025-12-23) · `New Trial` T47iri (2025-12-25) ·
++     `New Customer` W9Y37g (2026-03-23) · `Churned Customer` SL668n
++     (2026-03-23) · `Demo Booked` WtXNd6 (2025-12-18) · `Viewed Product`
++     WVeTEK (2025-12-11) · `Active on Site` Rj7QRn (2025-11-20).
++     `New Trial` matches imai_events `new_subscription_trial` ≈99%.
++  2. **~97 lists as the automation bus** — list-adds named EXACTLY like
++     imai_events events (`signup`, `new_subscription_trial`,
++     `new_subscription_payment`, `cancel_trial`, `cancel_subscription`,
++     `first_report_created`, `first_list_created`, `first_campaign_created`,
++     `free_trial_blocked`, `high_value_signup`, `scheduled_demo_*` /
++     `scheduled_ai_agent_call*` families) **plus Close stage labels**
++     (Qualification, Won, …). ALL live flows trigger on "Added to List".
++- Known quirks: duplicate list names (4× `signup` — aggregate by name);
++  **single-event routing** (trial cancelers land ONLY in `cancel_trial`
++  list — flows on `cancel_subscription` never reach them); **~1 in 10
++  events reach neither list** (sync not lossless).
++- 19 flows (16 live) map to platform behavior; the 14D/12D trial flows
++  belong to a retired 14-day trial — historical stats only.
++- Email-machinery metric ids (engagement): Received WGpvnP · Opened YuPnTi
++  (Apple MPP-inflated) · Clicked SuwFKe · Unsub RDN7PX · Bounced RRvD8B ·
++  Spam XRNkgF.
++
++**🔒 Completion (Q5):** identify the pushing integration (API key holder) in
++Klaviyo settings; quantify the ~10% list-miss on a 30-day sample; document
++which flows fire per event (list → flow map).
++
++## 3. Close CRM
++
++- Destination of the webhook events (leads timeline/automations — exact
++  consumption unknown until Q1/Q6) AND a source: pipeline stage changes are
++  mirrored back into imai_events as events (02 §6).
++- Read-side facts already verified in SCHEMA.md: two pipelines (Sales
++  `pipe_0xLHT…`, CS `pipe_4BnK…`) with stage ids for disambiguation; demo
++  booking auto-creates a Sales opportunity at Qualification; `value>0` ⇔
++  demo happened (Sales pipeline only); "No Show" is process-lost though
++  typed active; join keys: lead custom fields ⭐ IMAI User Id / Contact
++  Email / Stripe ID (cf ids in SCHEMA.md).
++- ⚠ This session's Close connector reaches the **NewVoices** org, not
++  IMAI's — automations inspection blocked (Q6).
++
++## 4. GA4 (property G-TD1DHH379G)
++
++Receives: client events (04 §3), GTM-mediated tags (unknown until Q15), and
++the server-side MP `purchase` (03 §4). Known risks to verify in the GA4 UI:
++`trial_success` double-fire (credit-card + onboarding paths), client
++`payment_success` vs server `purchase` double-count, hardcoded MP
++`client_id` collapsing all purchases onto one synthetic user, and staging
++pollution (MP call not env-gated) — all Q11.
++
++## 5. Coverage matrix (code-derived; ✔=lands there, ？=unconfirmed)
++
++| User action | proxy billing DB | imai_events | Mixpanel | Klaviyo | GA4 | Close |
++|---|---|---|---|---|---|---|
++| Signup | – | ✔ | ✔ | ✔ list+metric | ✔ client | ✔ |
++| Trial start | – | ✔ | ✔ | ✔ list+metric | ✔ client (+GTM) | ✔ |
++| Trial→paid | – | ✔ (thin patches) | ✔ | ✔ metric+list | ✔ MP purchase (99/499/1200 only) | ✔ |
++| Renewal charge | – | ⚠ ~57% count / 36% $ | ⚠ same | ？ | ？ | ？ |
++| Cancel (trial) | – | ✔ since 2026-04-22 | ✔ | ✔ cancel_trial list only | – | ✔ |
++| Cancel (paying) | – | ✔ (needs prior-payment filter) | ✔ | ✔ | – | ✔ |
++| Search | ✔ (billing rows) | ✔ (high vol) | ✔ | – | – | – |
++| Report created | ✔ (billing) | ✔ | ✔ (excluded from health score) | first only | – | – |
++| List/Campaign created | – | ✔ (dup names ⚠) | ✔ | first only | – | – |
++| Login | – | ✔ (session proxy) | ✔ | `Active on Site`? | – | – |
++| Trial friction | – | ✔ since 2026-06-30 | ✔ | ？ | – | ✔ (sales visibility is the stated purpose) |
++| Demo booked | – | ✔ (orphan emitter) | ✔ | ✔ metric | – | ✔ (auto-opportunity) |
++| Page visits (trial/search) | – | ？ via AWS pixel (Q17) | ？ | `Viewed Product`? | ✔ GA4 auto | – |
++
++**Revenue ground truth is NONE of these** — prod `user_payments` (stripe+
++cardcom, no manual deals) + Close values for manual deals; there is no
++complete revenue record anywhere (SCHEMA.md gotcha #1).
+diff --git a/docs/events-audit/08-data-quality.md b/docs/events-audit/08-data-quality.md
+new file mode 100644
+index 00000000..0af93ae8
+--- /dev/null
++++ b/docs/events-audit/08-data-quality.md
+@@ -0,0 +1,143 @@
++# 08 — Data-Quality Validation Playbook (Sprint 4)
++
++**Status:** Ready-to-run — every check below is written against the logs DB
++(`imai_events`) and prod DB so that the moment read access lands
++([Q3/Q14](./OPEN_QUESTIONS.md)), executing this sprint is mechanical.
++Known-good semantics and prior verified numbers are inline as expectations.
++
++Conventions: calendar-day windows (`date >= current_date - interval 'N days'`
++— rolling `now()` windows will NOT match manual counts, SCHEMA.md gotcha #9);
++`imai_events.date` is timezone-naive; exclude `%test%`, `ldrsgroup.com`,
++`influencermarketing.ai` emails to match the reporting views.
++
++## 1. Dictionary validation (Q14)
++
++```sql
++-- 1a. Every live event name + volume, 90d — diff against 02-event-dictionary.md
++SELECT event, count(*) n, count(DISTINCT user_id) u,
++       min(date) first_seen, max(date) last_seen
++FROM imai_events
++WHERE date >= current_date - interval '90 days'
++GROUP BY 1 ORDER BY n DESC;
++-- Expect: influencer_discovery_search dominates (~2.8M lifetime).
++-- Flag: names present here but missing from the dictionary (orphans beyond
++-- the known high_value_signup / scheduled_* / Close stage labels), and
++-- dictionary events with n=0 (dead emitters).
++
++-- 1b. Payload fill rates for enriched fields
++SELECT event,
++       avg((email IS NOT NULL)::int)        email_fill,
++       avg((name IS NOT NULL)::int)         name_fill,
++       avg((main_user_id IS NOT NULL)::int) main_user_fill,
++       avg((amount IS NOT NULL)::int)       amount_fill
++FROM imai_events
++WHERE date >= current_date - interval '90 days'
++GROUP BY 1 ORDER BY 1;
++-- Expect: payment events ~100% amount_fill; occasional missing email/name
++-- (backend sends un-enriched on user-lookup failure — 03-emitters.md §1).
++```
++
++## 2. Known-gap regression checks
++
++```sql
++-- 2a. Daily volume per key event, 120d — eyeball for thin patches like the
++--     April 2026 new_subscription_payment gap
++SELECT date_trunc('day', date) d, event, count(*)
++FROM imai_events
++WHERE event IN ('signup','new_subscription_trial','new_subscription_payment',
++                'payment_success','cancel_trial','cancel_subscription')
++  AND date >= current_date - interval '120 days'
++GROUP BY 1,2 ORDER BY 1,2;
++
++-- 2b. payment_success coverage vs prod truth (repeat of the June-2026 check:
++--     events saw 57% of charges / 36% of dollars). Logs side:
++SELECT count(*) charges, sum(amount) dollars
++FROM imai_events
++WHERE event IN ('payment_success') AND date >= date '2026-06-01' AND date < date '2026-07-01';
++--     Prod side (user_payments; price whole dollars, created epoch secs):
++SELECT count(*) charges, sum("price") dollars
++FROM user_payments
++WHERE paid = true AND "price" > 0
++  AND to_timestamp("created") >= date '2026-06-01'
++  AND to_timestamp("created") <  date '2026-07-01';
++
++-- 2c. Duplicate-fire checks
++--     created_campaign vs campaign_created should be ~1:1 if both fire per create (Q9)
++SELECT event, count(*) FROM imai_events
++WHERE event IN ('created_campaign','campaign_created')
++  AND date >= current_date - interval '30 days' GROUP BY 1;
++--     new_subscription_payment double-fires per user (known ~90%/dedupe note):
++SELECT user_id, count(*) c FROM imai_events
++WHERE event = 'new_subscription_payment'
++GROUP BY 1 HAVING count(*) > 1 ORDER BY c DESC LIMIT 20;
++-- Expect: ~7% of payers >1 (re-subscription); one outlier with 34.
++```
++
++## 3. Funnel integrity (anchors verified 2026-07-13, re-run to confirm)
++
++```sql
++-- Anchor coverage: % of trial-cancelers with a trial-start event (expect ~99%),
++-- % of payers with trial+signup anchors (expect ~97%)
++WITH t AS (SELECT user_id, min(date) trial_start FROM imai_events
++           WHERE event='new_subscription_trial' GROUP BY 1),
++     p AS (SELECT user_id, min(date) first_pay FROM imai_events
++           WHERE event='new_subscription_payment' GROUP BY 1)
++SELECT count(*) payers,
++       avg((t.user_id IS NOT NULL)::int) with_trial_anchor
++FROM p LEFT JOIN t USING (user_id);
++
++-- Trial→paid timing distribution (expect median ~6.9d, ~76% day 6–8)
++WITH t AS (SELECT user_id, min(date) ts FROM imai_events WHERE event='new_subscription_trial' GROUP BY 1),
++     p AS (SELECT user_id, min(date) fp FROM imai_events WHERE event='new_subscription_payment' GROUP BY 1)
++SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM fp-ts)/86400) median_days
++FROM t JOIN p USING (user_id) WHERE fp > ts;
++```
++
++## 4. Staging-pollution check (proxy not prod-gated — Q10)
++
++```sql
++-- Search events from non-prod: look for dev/staging emails or IPs, and for
++-- rows emitted while prod was quiet (deploy windows). Simplest proxy:
++SELECT email, count(*) FROM imai_events
++WHERE event LIKE 'influencer_discovery_search%'
++  AND (email ILIKE '%test%' OR email ILIKE '%influencermarketing.ai%' OR email ILIKE '%ldrsgroup%')
++  AND date >= current_date - interval '30 days'
++GROUP BY 1 ORDER BY 2 DESC;
++```
++
++## 5. Cross-source usage validation (proxy billing vs events)
++
++The proxy writes billing rows for every search independently of the webhook
++(03-emitters.md §3). Compare daily `insertBillingEntity` rows
++(packageTypeId=1, Search) in prod DB vs `influencer_discovery_search(_paginated)`
++in imai_events. Divergence = webhook loss rate for the highest-volume event —
++the best available proxy for overall pipeline loss (until Q1 gives us the
++receiver's own metrics).
++
++## 6. Mixpanel / Klaviyo lag & loss (🔒 blocked on Q19 / Q5)
++
++Procedure documented in 07-destinations.md §1.3 and §2. Prior verified
++figures to beat: Klaviyo `New Trial` ≈99% match; lists ~90%; Mixpanel drift
++"sync lag" (unquantified).
++
++## 7. White-label / reseller contamination
++
++```sql
++-- Legacy resellers are only visible via reseller_stripe_cuid (best-effort):
++SELECT count(DISTINCT user_id) FROM imai_events WHERE reseller_stripe_cuid IS NOT NULL;
++-- Expect ~126 users / 7 platforms; the `resellers` table maps cuid→platform.
++-- Modern white-labels: pull user."whiteLabelId" IS NOT NULL ids from prod
++-- (~100 users) and check their event presence here (they SHOULD be routed to
++-- per-label webhooks — presence in default imai_events = routing fallthrough, Q13).
++```
++
++## 8. Deliverable checklist for the sprint
++
++- [ ] §1a diff table appended to 02-event-dictionary.md (new/dead events)
++- [ ] §1b fill-rate table
++- [ ] §2 gap scan chart + regression notes
++- [ ] §3 funnel anchors re-verified (update SCHEMA.md dates if drifted)
++- [ ] §4/§7 contamination findings → Q10/Q13 answers
++- [ ] §5 webhook loss estimate
++- [ ] §6 Mixpanel/Klaviyo lag & loss (once unblocked)
++- [ ] 07-destinations.md coverage matrix ✔/？ cells resolved
+diff --git a/docs/events-audit/09-tracking-plan.md b/docs/events-audit/09-tracking-plan.md
+new file mode 100644
+index 00000000..e2413b75
+--- /dev/null
++++ b/docs/events-audit/09-tracking-plan.md
+@@ -0,0 +1,70 @@
++# 09 — Tracking Plan v1 (Sprint 5 — PROPOSAL, needs stakeholder review)
++
++**Status:** Draft proposal from the audit. Nothing here is applied. Renames
++must wait for the Mixpanel/Klaviyo protected-names audit (Q19/Q20) because
++downstream automations key on exact strings (Klaviyo lists, Close flows).
++
++## 1. Naming convention (proposed)
++
++- `snake_case`, verb-first past tense for actions: `object_action` →
++  **`<domain>_<object>_<action>`** for new events (e.g. `campaign_created`,
++  `report_created`, `trial_upgrade_clicked`).
++- No entity names/IDs baked into event NAMES (violations today:
++  `scheduled_forced_onboarding_tehilla`, per-rep `scheduled_*_call`
++  variants, `trial_upgrade_<placement>`) — move the variable part to a
++  property (`placement`, `rep`, `feature`).
++- Reserved prefixes: `trial_` (friction/intent), `pr_` (PR module),
++  `social_listening_`, `first_` (activation milestones).
++- Sales/CRM mirror events must be namespaced `crm_<stage>` instead of raw
++  stage labels colliding with product events.
++- Required base properties on every event: `user_id`, `main_user_id`,
++  `email`, `white_label` (NEW — today stripped), `source_service`
++  (NEW — backend|proxy|social-listening|frontend-bridge).
++
++## 2. Keep / rename / merge / deprecate map
++
++| Current | Verdict | Notes |
++|---|---|---|
++| Core lifecycle (`signup`, `new_subscription_trial`, `new_subscription_payment`, `cancel_trial`, `cancel_subscription`, `payment_failed`, `upgrade_package_payment`, `free_trial_blocked`) | **KEEP as-is** | Protected: Klaviyo lists + Close automations + Mixpanel history key on these. |
++| `payment_success` | KEEP name, **fix coverage** | Either emit on ALL renewal paths (incl. big annual/enterprise) or explicitly document as partial. Never rename — trend history. |
++| `created_campaign` + `campaign_created` | **MERGE** (Q9) | Keep whichever downstream uses; emit once. Decide after Q9 volume check. |
++| `created_report` / `created_geo_analysis` / `created_social_listening_report` vs `first_*_created` | KEEP | Consistent enough; document the `first_` milestone convention. |
++| `scheduled_forced_onboarding_tehilla` | **RENAME** → `forced_onboarding_scheduled` (+`rep` property) | Person-named event. |
++| `trial_upgrade_<placement>` family | KEEP short-term, **collapse long-term** → `trial_upgrade_clicked` + `placement` property | 15 names for one action makes Mixpanel funnels painful; but Klaviyo/Close may key on specific placements — verify first. |
++| `trial_{feature}_{daily|total}_limit_reached[_dayN]` | Same treatment → `trial_limit_reached` + `{feature, period, trial_day}` | Properties already exist in the payload — the name duplication is redundant. |
++| Close stage labels as events (`Qualification`, `Won`, …) | **NAMESPACE** → `crm_stage_changed` + `{stage, pipeline}` | Blocked on finding the mirror mechanism (Q6). |
++| Orphans (`high_value_signup`, `scheduled_demo_*`, `scheduled_ai_agent_call*`) | DOCUMENT once emitter found (Q6) | Then apply naming rules. |
++| `user_logged_in` | KEEP | Sole session proxy; consider adding real session events (below). |
++
++Migration rule: renames are **dual-emit** (old+new) for one quarter with a
++Mixpanel Lexicon alias, then old is dropped; Klaviyo lists get re-pointed
++during the dual window.
++
++## 3. Missing events (gap candidates — validate with stakeholders)
++
++From code reading, these user actions emit NOTHING to the pipeline today:
++
++1. `created_list` (only `first_list_created` exists — list cadence invisible).
++2. Report viewed/downloaded/shared (creation is tracked, consumption isn't).
++3. List → influencer added (health score references an 'Added Influencer to
++   List' Mixpanel name, but no in-repo emitter — likely a dead/legacy event; Q19).
++4. Search filters used / result clicked → report opened (search→report
++   funnel has no middle).
++5. CRM/outreach module actions (influencer-crm has no events at all).
++6. Session end / duration (only login exists).
++7. Feature-level adoption for brand-safety, overlap, UGC workspace — zero events.
++8. White-label tenant activity as a first-class dimension (Q13).
++9. API-key (programmatic) usage visible only in proxy billing, never as events.
++
++## 4. Governance (proposed)
++
++- **This folder is the tracking plan.** A new event = PR touching
++  02-event-dictionary.md + the emitter code; reviewers include a data owner.
++- CI guardrail (Sprint 5 backlog item): test extracts event names from
++  `sendPipeDriveWebhook(` call sites + the trial whitelist and fails if any
++  name is missing from 02-event-dictionary.md.
++- Quarterly: re-run 08-data-quality.md §1 diff; update SCHEMA.md verified
++  dates.
++- Ownership table (fill in): pipeline infra (❓ Q1/Q2), emitters (backend
++  team), Mixpanel (❓), Klaviyo (marketing), Close (sales ops), GTM/GA4
++  (marketing — Q15).
+diff --git a/docs/events-audit/10-gaps-and-remediation.md b/docs/events-audit/10-gaps-and-remediation.md
+new file mode 100644
+index 00000000..f10e9875
+--- /dev/null
++++ b/docs/events-audit/10-gaps-and-remediation.md
+@@ -0,0 +1,50 @@
++# 10 — Gaps & Remediation Backlog (Sprint 5)
++
++**Status:** Ticket-ready backlog from the audit. Priorities: P1 = data
++integrity/correctness, P2 = hygiene/security, P3 = capability. Effort:
++S (<1d) / M (1–3d) / L (1w+). Items marked 🔒 depend on an open question.
++
++## P1 — Data integrity
++
++| # | Item | Effort | Detail |
++|---|---|---|---|
++| R1 | Prod-gate the proxy emitter | S | proxy/index.js:112 — add the same `NODE_ENV==='prod'` guard as backend/main (or env allowlist). Kills staging pollution of the highest-volume event. (Q10 confirms intent first.) |
++| R2 | Gate / fix the GA4 MP server purchase | S | payments.service.ts:1798 — env-gate; replace hardcoded `client_id` with the user's GA client id (or a per-user stable id); revisit the {99,499,1200} price allowlist which silently drops other plans. 🔒 Q11 (what consumes it). |
++| R3 | Resolve `created_campaign` vs `campaign_created` | S | campaigns.controller.ts:339/:356 — emit one canonical event. 🔒 Q9 (which name downstream uses). |
++| R4 | Fix `payment_success` coverage or re-scope it | M | Emit on ALL renewal paths (find the uncovered big-renewal path) or mark the event "partial" in every consumer. Today it silently under-reports dollars 3×. |
++| R5 | Single shared emitter contract | M | One typed module (event-name union + payload interface + enrichment + white-label routing + prod gate) consumed by backend/main; port proxy & social-listening to the same names/shape. Kills the duplicated `PipeDriveData` and the three divergent implementations. |
++| R6 | Delivery reliability decision | M–L | All emitters are fire-and-forget (no retry/queue/outbox). After Sprint 4 measures real loss (08 §5), decide: accept, or add an outbox table + retry worker. |
++| R7 | Add `white_label` + `source_service` to payloads | S | Stop stripping tenant identity (03 §1); resellers become filterable in imai_events. 🔒 Q13 (routing intent). |
++
++## P2 — Hygiene & security
++
++| # | Item | Effort | Detail |
++|---|---|---|---|
++| R8 | Move hardcoded secrets to env | S | Slack webhook URLs (5+), Bubble bearer token (users.service.ts:3845 etc.), GA4 api_secret (payments.service.ts:1798), Segment write key is public-by-design (ok). Rotate the Bubble token after extraction — it's in git history. |
++| R9 | Ungate make.com email-test + Slack block webhooks | S | users.service.ts:3816/:3831 fire from non-prod — add gates. |
++| R10 | Remove dead code | S | `sendWebhook` (users.service.ts:3704, no caller), proxy `check24Usage` path (index.js:318 commented caller), `SLOT_ACQUIRED` placeholder. |
++| R11 | PII review | M | Email in GTM dataLayer/Clarity/Segment; ip in imai_events + Bubble capture; no CMP found in code. Legal/consent decision needed, esp. for white-label domains loading IMAI tags. 🔒 Q12/Q15. |
++| R12 | Commit or document server-only services | M | backend/scraper + backend/frontend-logger exist only on the prod VM (Q8) — version-control them or document why not. |
++| R13 | Rename `sendPipeDriveWebhook` → `sendCloseEvent` (or `emitProductEvent`) | S | Part of R5; the misnomer actively confuses (Pipedrive is gone). |
++| R14 | Conversion SDK: drop client-side ipify lookup | S | sdk/pixel.js:451 — server already sees request IP; removes 3rd-party call from customer stores (06 §4.1). |
++| R15 | Decide the canonical conversion-ingestion path | M | Bubble `wf/order-conversion-*` vs `/tracking/conversion` both live in the tutorial (06 §4.2) — deprecate one. 🔒 Q21. |
++
++## P3 — Capability gaps (from 09 §3)
++
++| # | Item | Effort |
++|---|---|---|
++| R16 | `created_list` event | S |
++| R17 | Report consumption events (viewed/downloaded/shared) | S–M |
++| R18 | Search→report funnel middle (result clicked / report opened from search) | M |
++| R19 | influencer-crm + brand-safety + UGC module events | M |
++| R20 | Real session semantics (or bless `user_logged_in` officially) | M |
++| R21 | CI guardrail: emitter call sites ↔ 02-event-dictionary.md sync test | S–M |
++| R22 | GTM container cleanup (second container, duplicate tags) | S 🔒 Q15 |
++
++## Suggested sequencing
++
++1. **Now (no dependencies):** R1*, R8, R9, R10, R13, R14, R16, R21
++   (*R1 behind a quick Q10 confirmation).
++2. **After Q-answers land:** R2 (Q11), R3 (Q9), R7 (Q13), R11 (Q12/15), R15 (Q21), R22 (Q15).
++3. **After Sprint 4 measurements:** R4, R5, R6 (loss data decides the design).
++4. **Roadmap-driven:** R17–R20 with product prioritization.
+diff --git a/docs/events-audit/EVENTS_AUDIT_PLAN.md b/docs/events-audit/EVENTS_AUDIT_PLAN.md
+index 470c7364..f61e9581 100644
+--- a/docs/events-audit/EVENTS_AUDIT_PLAN.md
++++ b/docs/events-audit/EVENTS_AUDIT_PLAN.md
+@@ -1,6 +1,10 @@
+ # Events Audit & Documentation Plan — Mixpanel / AWS / Analytics Pipeline
+ 
+-**Status:** Draft v1 (codebase audit complete, pipeline discovery pending)
++**Status:** Executed 2026-07-20 to the limit of available access — see
++[00-overview.md](./00-overview.md) for the document index and per-sprint
++state, and [OPEN_QUESTIONS.md](./OPEN_QUESTIONS.md) for what remains blocked.
++Sprint 1 → 01-architecture.md · Sprint 2 → 02/03 · Sprint 3 → 04/05/06 ·
++Sprint 4 → 07/08 (playbook ready, execution needs access) · Sprint 5 → 09/10.
+ **Date:** 2026-07-20
+ **Goal:** Produce authoritative documentation of every product/marketing event the platform
+ emits, how each event travels to its destinations (Mixpanel, the logs/"pixel" DB, Close CRM,
+diff --git a/docs/events-audit/OPEN_QUESTIONS.md b/docs/events-audit/OPEN_QUESTIONS.md
+index d4430b29..1c81d25f 100644
+--- a/docs/events-audit/OPEN_QUESTIONS.md
++++ b/docs/events-audit/OPEN_QUESTIONS.md
+@@ -59,6 +59,12 @@ section with the next free ID.
+ | Q19 | Mixpanel: full event/property inventory, identity-resolution rules (user_id vs email vs main_user_id), measured sync lag & loss per event. | Core Sprint 4 deliverable; today "lossy + lagging" is anecdotal. | Mixpanel project admin (Lexicon + raw export API). | OPEN |
+ | Q20 | Which Mixpanel reports/boards does the team actually use (health score is replicated in-code at usage-board.service.ts:1909 — what else)? | Tells us which events MUST stay stable through any taxonomy cleanup. | Ask Mixpanel users (product/CS); Mixpanel usage report. | OPEN |
+ 
++## E. Conversion pixel & misc (Sprint 3+)
++
++| ID | Question | Why it matters | How to answer | Status |
++|----|----------|----------------|---------------|--------|
++| Q21 | Which conversion-ingestion path is canonical: the Bubble `wf/order-conversion-*` workflows or `/tracking/conversion` (both are presented in the in-app tutorial)? Is the Bubble path still consumed? | Two live ingestion paths for customer conversions = split data + double maintenance; deprecation decision needed (R15). | Ask whoever owns the Bubble app; check Bubble workflow run logs vs `CampaignInfluencerConversions` rows. | OPEN |
++
+ ---
+ 
+ ## Answered
+-- 
+2.43.0
+

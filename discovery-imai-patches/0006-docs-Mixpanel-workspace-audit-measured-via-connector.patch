@@ -1,0 +1,112 @@
+From ed6b2d95fcdecc5e705d1e9ecc350cc9731d8954 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 21 Jul 2026 04:33:25 +0000
+Subject: [PATCH 6/7] =?UTF-8?q?docs:=20Mixpanel=20workspace=20audit=20meas?=
+ =?UTF-8?q?ured=20via=20connector=20=E2=80=94=20dual=20namespaces,=20volum?=
+ =?UTF-8?q?es,=20mapping=20(LOCAL=20ONLY,=20do=20not=20push)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+104 events inventoried with 30-day volumes in project 3432835. Findings:
+a second Title-Case pipeline with no in-repo emitter (Platform Usage
+1.6M/30d), renamed lifecycle events (new_subscription_trial -> Free
+Trial Signup), live same-action duplicates, and whole event families
+missing from Mixpanel. Q19 partial; new Q24-Q26.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XUduGDBwL4mE8PagCqcPMY
+---
+ docs/events-audit/07-destinations.md | 59 ++++++++++++++++++++++++++++
+ docs/events-audit/OPEN_QUESTIONS.md  |  5 ++-
+ 2 files changed, 63 insertions(+), 1 deletion(-)
+
+diff --git a/docs/events-audit/07-destinations.md b/docs/events-audit/07-destinations.md
+index a42fb4f3..85ec3f88 100644
+--- a/docs/events-audit/07-destinations.md
++++ b/docs/events-audit/07-destinations.md
+@@ -9,6 +9,65 @@ ready-to-run completion procedure.
+ 
+ ## 1. Mixpanel
+ 
++### 1.0 MEASURED 2026-07-20 (via Mixpanel connector — project 3432835 "Influencer Marketing AI", 30-day totals)
++
++**The project contains 104 events in TWO live namespaces:**
++
++1. **A Title-Case namespace with NO emitter in the codebase** — high volume and active:
++   `Platform Usage` **1,614,471**/30d (!), `Influencer Report` 33,200, `Influencer
++   Search` 11,118, `Login` 10,739, `Campaign Media Scraped` 6,583, `Added
++   Influencer to List` 6,313, `Added Tracked Campaign Influencer` 3,579, `Created
++   Influencer List` 379, `Payment Attempt` 254, `Created Campaign` 214, `Added
++   Payment Method` 213, `Free Trial Signup` 153, `Intercom Conversation` 116,
++   `Cancelled Subscription` 86, `Invited Team Member` 85, `Deleted Account` 42,
++   `Campaign Invite` 411, `Campaign Requirement Approval` 134, plus low-volume
++   (Bulk Contacts Export 25, Scheduled Meeting 26, Campaign Chat Message 16,
++   Created Campaign Requirements 35, Forgot Password 5). Source unidentified —
++   this is a SECOND event pipeline (Q24).
++2. **The snake_case webhook namespace** (matches the code-derived dictionary):
++   `influencer_discovery_search` 18,765, `user_logged_in` 10,275,
++   `influencer_discovery_search_paginated` 5,366, `report_creation_attempt`
++   29,614, `report_creation_failed` 2,737, `influencer_added_to_campaign` 2,622,
++   `signup` 1,854, `finished_onboarding` 466, `first_report_created` 427,
++   `payment_failed` 218, `duplicate_charge_prevented` 169, `pr_journalist_search`
++   115, `free_trial_blocked` 79, `started_cancellation_process` 75, `first_list_created`
++   58, `team_member_added` 53, `cancel_trial` 48, `payment_success` 47,
++   `pr_generated_pitch` 47, `new_subscription_payment` 34, `deactivate_account`
++   28, `trial_unlock_modal_opened` 83, trial_upgrade_* ≈60 total, others <30.
++
++**Mapped (renamed) events — these snake names DO NOT EXIST in Mixpanel:**
++`new_subscription_trial` → `Free Trial Signup` · `cancel_subscription` →
++`Cancelled Subscription` · `created_report` → `Influencer Report`(?) ·
++`created_campaign`/`campaign_created` → `Created Campaign`(?) — the health-score's
++mixed name lists are explained by this mapping.
++
++**Same-action pairs BOTH live (double-counting hazard):**
++`Login` 10,739 vs `user_logged_in` 10,275 (≈4% apart — likely same action from
++two sources) · `Influencer Search` 11,118 vs `influencer_discovery_search`
++18,765 (**41% apart — different definitions, Q25**) · `Invited Team Member` 85
++vs `team_member_added` 53.
++
++**Dictionary events ABSENT from Mixpanel entirely:** the whole social-listening
++family (`created_social_listening_report`, `generated_social_trends_insight`,
++`social_listening_segment_created`, `social_listening_report_ready`),
++`pr_sent_pitch`, `first_campaign_created`, `manual_subscription_purchase_blocked`,
++`trial_charge_exception`, `new_trial_email_failed`, `trial_book_call_clicked`,
++`trial_upgrade_campaign_list_banner`, `trial_upgrade_search_limit_empty_state`,
++the `trial_search_*_limit` family, `high_value_signup` (in Klaviyo but NOT
++Mixpanel), `user_logged_in`'s sibling `created_list` (new 2026-07-20 — expected
++sync lag, recheck).
++
++**Mixpanel-only events not in the dictionary (beyond the Title-Case family):**
++`api_credits_added`/`api_credits_renewed`, `reseller_customer_created`, `refund`,
++`answered_scheduled_ai_agent_call`, `canceled_demo_scheduled_{danielr,morya,shah}`,
++`scheduled_demo_{morya,tom}`, `scheduled_forced_onboarding_shah`,
++`scheduled_onboarding_button_shah`, `scheduled_trial_agent_call`,
++`trial_upgrade_clicked` (6/30d — someone already emits the collapsed name),
++`$session_start`/`$session_end` (Mixpanel virtual).
++
++**Lexicon hygiene: zero.** No event has a description, tag, display name, or
++verified flag. No business context is configured on the project.
++
+ **What we know:**
+ - Populated ONLY by the external sync from the webhook/logs-DB pipeline —
+   no code in this repo writes to it (verified repo-wide).
+diff --git a/docs/events-audit/OPEN_QUESTIONS.md b/docs/events-audit/OPEN_QUESTIONS.md
+index ae8d9eb5..9ec58d85 100644
+--- a/docs/events-audit/OPEN_QUESTIONS.md
++++ b/docs/events-audit/OPEN_QUESTIONS.md
+@@ -56,7 +56,10 @@ section with the next free ID.
+ 
+ | ID | Question | Why it matters | How to answer | Status |
+ |----|----------|----------------|---------------|--------|
+-| Q19 | Mixpanel: full event/property inventory, identity-resolution rules (user_id vs email vs main_user_id), measured sync lag & loss per event. | Core Sprint 4 deliverable; today "lossy + lagging" is anecdotal. | Mixpanel project admin (Lexicon + raw export API). | OPEN |
++| Q19 | Mixpanel: full event/property inventory, identity-resolution rules (user_id vs email vs main_user_id), measured sync lag & loss per event. | Core Sprint 4 deliverable; today "lossy + lagging" is anecdotal. | **Inventory DONE 2026-07-20 via Mixpanel connector** (104 events + 30d volumes — 07-destinations.md §1.0). Remaining: identity rules, lag/loss measurement (needs logs-DB counts to diff against, Q3). | PARTIAL |
++| Q24 | What emits the Title-Case Mixpanel namespace (`Platform Usage` 1.6M/30d, `Influencer Report`, `Login`, `Campaign Media Scraped`, …)? NO emitter exists in the codebase — a second live pipeline. | It's the HIGHEST-volume tracking on the platform and completely undocumented; several names duplicate snake_case events (double-count hazard). | Likely the external webhook pipeline or a legacy direct integration; Q1/Q2 access will reveal it. Check Mixpanel project's data sources / service accounts. | OPEN |
++| Q25 | Why do `Influencer Search` (11,118/30d) and `influencer_discovery_search` (18,765/30d) differ by 41% if they describe the same action? | Whichever a dashboard uses changes search KPIs by nearly half. | Compare property sets and a per-user sample of both events; likely different definitions (UI-only vs UI+API, or dedup). | OPEN |
++| Q26 | The social-listening event family, `pr_sent_pitch`, `first_campaign_created`, and several trial events never reach Mixpanel (present in code + presumably imai_events). Where does the sync drop them? | Whole product areas invisible in Mixpanel. | Answered by the sync job's config (Q4); verify against imai_events once logs-DB access lands. | OPEN |
+ | Q20 | Which Mixpanel reports/boards does the team actually use (health score is replicated in-code at usage-board.service.ts:1909 — what else)? | Tells us which events MUST stay stable through any taxonomy cleanup. | Ask Mixpanel users (product/CS); Mixpanel usage report. | OPEN |
+ 
+ ## E. Conversion pixel & misc (Sprint 3+)
+-- 
+2.43.0
+
