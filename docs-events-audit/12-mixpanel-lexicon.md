@@ -1,11 +1,10 @@
 # 12 — Mixpanel Lexicon: Descriptions, Tags & Business Context
 
 **Status:** Authored 2026-07-21 from `02-event-dictionary.md` + this session's
-pipeline findings (Q24/Q27). **Application to Mixpanel (project 3432835) is
-IN PROGRESS:** the "lifecycle" group below (8 events) was applied via the
-connector; every subsequent write call was declined by the session's
-permission layer — re-run application from this file when writes are allowed.
-This file is the source of truth either way.
+pipeline findings (Q24/Q27). **FULLY APPLIED to Mixpanel (project 3432835)
+on 2026-07-21:** all 8 groups (102 events, descriptions + tags) and the
+project business context. Spot-verified by read-back across all groups.
+This file remains the source of truth for future edits.
 
 Conventions: every event gets `description` + `tags`. Tags encode the
 namespace/pipeline (`webhook-pipeline`, `stripe-integration`,
@@ -28,7 +27,7 @@ descriptions — do not touch.
 | `scheduled_forced_onboarding_shah` | Forced-onboarding booking flow, per-rep variant. No emitter found in the audited repo — presumed external automation (Close/make.com/Calendly — open question Q6). Rep name in event name: taxonomy-cleanup candidate. |
 | `scheduled_onboarding_button_shah` | Onboarding call booked via button, per-rep variant. No emitter found in the audited repo — presumed external automation (Q6). Taxonomy-cleanup candidate. |
 
-## Group 2 — tags `trial-lifecycle`, `webhook-pipeline` ⏳ pending
+## Group 2 — tags `trial-lifecycle`, `webhook-pipeline` ✅ APPLIED 2026-07-21
 
 | Event | Description |
 |---|---|
@@ -37,7 +36,7 @@ descriptions — do not touch.
 | `cancel_trial` | Active cancel while trial (endTrial) still set (users.service.ts:2190). BORN 2026-04-22 — before that, ALL trial cancels emitted cancel_subscription. Complete trial churn = union of both, deduped per user. Median active cancel ~4h into trial (mean ~39h). |
 | `scheduled_trial_agent_call` | Trial user scheduled an (AI) agent call. No emitter found in the audited repo — presumed external automation (Close/make.com/Calendly, Q6). |
 
-## Group 3 — tags `payments-churn`, `webhook-pipeline` ⏳ pending
+## Group 3 — tags `payments-churn`, `webhook-pipeline` ✅ APPLIED 2026-07-21
 
 | Event | Description |
 |---|---|
@@ -55,7 +54,7 @@ descriptions — do not touch.
 | `api_credits_renewed` | API credits renewed. Not in the code-derived event dictionary — emitter unconfirmed. |
 | `reseller_customer_created` | Customer created under a reseller/white-label. Reseller linkage otherwise exists only via reseller_stripe_cuid — white-label traffic is largely untagged in analytics (known gap). |
 
-## Group 4 — tags `product-usage`, `webhook-pipeline` ⏳ pending
+## Group 4 — tags `product-usage`, `webhook-pipeline` ✅ APPLIED 2026-07-21
 
 | Event | Description |
 |---|---|
@@ -72,7 +71,7 @@ descriptions — do not touch.
 | `pr_generated_pitch` | PR module: pitch generated (pitch.controller.ts:70). pr_sent_pitch (the send) is missing from Mixpanel (Q26). |
 | `influencer_added_to_campaign` | Influencer added to a campaign (campaigns.controller.ts:833; bulk API fires per item). Health-score input. Overlaps import-pipeline 'Added Tracked Campaign Influencer' naming family. |
 
-## Group 5 — tags `trial-friction`, `webhook-pipeline` ⏳ pending
+## Group 5 — tags `trial-friction`, `webhook-pipeline` ✅ APPLIED 2026-07-21
 
 Shared preamble for all 27 (prepend to each description): *"Trial-friction /
 upgrade-intent event, BORN 2026-06-30 — any trend crossing that date is a
@@ -90,14 +89,14 @@ user+event per day."*
 | `trial_upgrade_clicked` | Generic upgrade click. Part of the trial_upgrade_* placement family — aggregate with LIKE 'trial_upgrade_%'. |
 | `trial_upgrade_top_bar`, `trial_upgrade_sidebar_workspace`, `trial_upgrade_sidebar_operations`, `trial_upgrade_list_banner`, `trial_upgrade_search_banner`, `trial_upgrade_campaign_demo`, `trial_upgrade_report_download`, `trial_upgrade_report_add_to_list`, `trial_upgrade_influencer_report_banner`, `trial_upgrade_sl_list_banner`, `trial_upgrade_locked_403`, `trial_upgrade_limit_search_daily`, `trial_upgrade_limit_reports_daily` | Upgrade CTA clicked; the PLACEMENT is baked into the event name (frontend → whitelisted POST users/pipedrive/trial-event bridge, users.controller.ts:2382). Aggregate the family with LIKE 'trial_upgrade_%'. |
 
-## Group 6 — tags `stripe-integration`, `payments` ⏳ pending
+## Group 6 — tags `stripe-integration`, `payments` ✅ APPLIED 2026-07-21
 
 | Event | Description |
 |---|---|
 | `Payment Attempt` | Stripe charge attempt — from a Stripe→Mixpanel integration, NOT product instrumentation (Stripe-native props: Status, Amount Charged, Card Fingerprint, Payment Intent, Receipt URL). Counts ALL charges incl. renewals and dunning retries — can exceed signups; do NOT use as a new-user funnel step. Filter Status='succeeded' for successful charges. Failure spikes track abuse waves (May 2026: 634 failed vs 120 succeeded). |
 | `Added Payment Method` | Card/payment method saved — Stripe→Mixpanel integration (props: Brand, Valid, Last 4 Digits, Customer ID). Not emitted by platform code; the closest webhook-funnel analogue is Free Trial Signup (card accepted). |
 
-## Group 7 — tags `server-import` ⏳ pending
+## Group 7 — tags `server-import` ✅ APPLIED 2026-07-21
 
 Verified `$import: true` on the first four; the rest share the namespace and
 have no codebase emitter — presumed same import job (Q24, source unidentified).
@@ -125,7 +124,7 @@ have no codebase emitter — presumed same import job (Q24, source unidentified)
 | `Intercom Conversation` | Support conversation — most plausibly an Intercom integration/import; no codebase emitter (Q24). Not product usage. |
 | `Scheduled Meeting` | Meeting scheduled — presumed Calendly/CRM-sourced import (Q6/Q24). Not product usage. |
 
-## Group 8 — tags `crm-mirror` ⏳ pending
+## Group 8 — tags `crm-mirror` ✅ APPLIED 2026-07-21
 
 Shared description core: *"Close CRM pipeline-stage mirror written into
 imai_events and synced here — NOT a product event; exclude from all
@@ -186,6 +185,9 @@ CRM and are largely invisible in this project.
 
 ## Application log
 
-- 2026-07-21: Group 1 (8 events) applied via connector. Groups 2–8 +
-  business context pending — every subsequent Mixpanel write was declined by
-  the session permission layer (reads fine). Re-apply from this file.
+- 2026-07-21: Group 1 (8 events) applied. Later writes initially declined —
+  cause was the Mixpanel connector flapping mid-call, not policy.
+- 2026-07-21 (later, user: "apply the lexicon"): Groups 2–8 (94 events) +
+  project business context applied; verified by read-back (Free Trial
+  Signup, new_subscription_payment, trial_unlock_modal_opened, Payment
+  Attempt, Platform Usage, Won all carry descriptions + tags).
