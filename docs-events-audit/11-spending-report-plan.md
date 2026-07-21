@@ -145,7 +145,7 @@ Product motions:
 
 1. **Now (no access needed):** cohort the Mixpanel funnel monthly; property-level
    analysis of free_trial_blocked errors and trial-friction→conversion paths.
-   (Mixpanel connector — reconnect when needed.)
+   (Mixpanel connector — reconnect when needed.) **→ DONE 2026-07-21, see §7.**
 2. **With logs DB (Q3):** verify funnel vs imai_events; hours-0–4 behavioral
    diff converters-vs-cancelers; limit-hit→conversion correlation.
 3. **With prod DB:** all §4 money questions for self-serve; dunning recovery;
@@ -153,3 +153,79 @@ Product motions:
    the complete-revenue picture (self-serve + manual).
 4. **Then:** the actual "State of Spending" report — one document, both
    engines, with the §5 recommendations sized in dollars.
+
+---
+
+## 7. Interim measurements — 2026-07-21 [MP, project 3432835]
+
+Full write-up: `deliverables/State-of-Spending-Interim.docx`. Headlines:
+
+### 7.1 Monthly cohorted funnel (unique users per calendar month)
+
+| Event | Dec25 | Jan | Feb | Mar | Apr | May | Jun | Jul(→20) |
+|---|---|---|---|---|---|---|---|---|
+| `signup` | 110 | 229 | 155 | 374 | 1,033 | 1,837 | 1,527 | 1,387 |
+| `Payment Attempt` (Stripe, see 7.4) | 179 | 158 | 127 | 143 | 203 | 264 | 227 | 92 |
+| `Added Payment Method` (Stripe) | 9 | 23 | 23 | 53 | 200 | 277 | 344 | 114 |
+| `free_trial_blocked` | 10 | 28 | 28 | 36 | 116 | 100 | 69 | 29 |
+| `Free Trial Signup` | 9 | 22 | 20 | 51 | 185 | 217 | 221 | 84 |
+| `cancel_trial` (born 04-22) | — | — | — | — | 30 | 131 | 90 | 21 |
+| `new_subscription_payment` | 2 | 7 | 6 | 11 | 21 | 31 | 41 | 18 |
+| `upgrade_package_payment` | 1 | 0 | 0 | 0 | 2 | 2 | 5 | 2 |
+| `Cancelled Subscription` | 13 | 18 | 7 | 24 | 76 | 37 | 74 | 48 |
+| `payment_failed` (uniques) | 28 | 27 | 13 | 30 | 33 | 70 | 45 | 11 |
+
+Signups ×5'd Apr–May (374→1,837); signup→trial has held ~11–14.5% since
+April (the ~86–88% cliff is structural, not a one-month artifact). Paid
+conversions are trending up: 21 → 31 → 41 (June).
+
+### 7.2 Cohorted trial→paid (funnels report, 14-day window)
+
+- Apr 1 – Jul 6 cohort: **662 trials → 90 paid = 13.6%**, avg time-to-convert
+  **8.2 days** (autocharge-dominated, consistent with [SCHEMA] 6.9d median).
+- Time-to-cancel (`Free Trial Signup`→`cancel_trial`, 8d window): **mean 39.3h**
+  — consistent with ~4h median [SCHEMA] plus a long tail.
+
+### 7.3 Abuse gate (`free_trial_blocked`)
+
+- **The event carries ZERO payload properties in Mixpanel** — the error text
+  the plan wanted to analyze never reaches Mixpanel (see Q27). Error-payload
+  analysis requires the logs DB (Q3) or forwarding the payload (new R-item).
+- Geo proxy analysis (Apr 1–Jul 20, uniques): 314 blocked vs 705 trials
+  passed. Block share of card-enterers by country: **US 22% (32/143),
+  UK 31% (37/118), Brazil 35% (21/60), Turkey 34% (14/41),
+  Philippines 49% (19/39)**. Blocking a fifth to a third of top-market
+  card-enterers is a large false-positive surface if the gate targets
+  card-testing fraud.
+- Corroborating fraud context: Stripe `Payment Attempt` **failed** charges
+  spiked with the signup surge (Apr 296, May 634 failed vs ~104–120
+  succeeded) and fell back in June (260) — an abuse wave shape. A "Free
+  Trial Abuse" dashboard (Robby Frank, 2024) exists for multi-signup abusers.
+
+### 7.4 `Payment Attempt` reinterpreted (affects drop-off #1 wording)
+
+`Payment Attempt` and `Added Payment Method` carry Stripe-native properties
+(Card Fingerprint, Payment Intent, Amount Charged, Status, Receipt URL;
+Brand/Valid) → they are a **Stripe→Mixpanel integration**, not funnel
+instrumentation. `Payment Attempt` counts ALL charge attempts incl. renewals
+and dunning retries (Dec: 179 attempts vs 110 signups). The §2 funnel row
+"254 payment attempts" therefore OVERSTATES new-user card attempts; the
+signup→card cliff is likely WORSE than stated. Status split (total events):
+failed 78–634/mo, succeeded 89–169/mo, stable while failures swing.
+
+### 7.5 Trial-friction events (born 2026-06-30 — too young, first read)
+
+- Jul 1–20 cohort (86 trials): **40% hit `trial_unlock_modal_opened`** (34).
+  Modal-hitters converted 15% (5/34) vs 13% (11/86) baseline — no evidence
+  yet that friction placements convert better; n is tiny, re-run in September.
+- Pre-birth windows show ~0 friction events — any friction analysis dated
+  before 2026-06-30 is invalid by construction.
+
+### 7.6 Q24 progress (Title-Case namespace source)
+
+- Payment events = **Stripe integration** (Stripe-native props).
+- `Platform Usage`, `Login`, `Influencer Search`, `Influencer Report` carry
+  `$import: true` + internal props (`Cost`, `Report ID`, `Influencers Found`,
+  `Type`, `Platform`) → a **server-side batch import** (Mixpanel /import API)
+  from internal usage data, NOT an SDK. Remaining: find the job/service
+  account (Mixpanel project settings → service accounts, or Q1/Q2 access).
