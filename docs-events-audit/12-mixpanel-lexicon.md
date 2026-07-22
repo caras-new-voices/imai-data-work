@@ -108,7 +108,7 @@ have no codebase emitter — presumed same import job (Q24, source unidentified)
 | `Influencer Search` | Server-side import of searches. DUPLICATE-RISK vs webhook influencer_discovery_search — 41% apart (11.1k vs 18.8k/30d, Q25: likely different definitions, UI-only vs UI+API). Pick one per KPI. |
 | `Influencer Report` | Server-side import of report creation (props: Report ID, Influencer ID, Platform). Probably the import-side counterpart of webhook created_report, which is ABSENT from Mixpanel. |
 | `Added Influencer to List` | Server-side import (list activity). Overlaps webhook created_list/first_list_created family. No codebase emitter (Q24). |
-| `Created Influencer List` | Server-side import. Overlaps webhook created_list (born 2026-07, R16) and first_list_created. No codebase emitter (Q24). |
+| `Created Influencer List` | Server-side import. Overlaps webhook first_list_created. No codebase emitter (Q24). ⚠ Corrected 2026-07-22: the planned webhook created_list (R16) was never merged — it does not fire (Q29). |
 | `Created Campaign` | Server-side import. The webhook pair created_campaign/campaign_created (both fire — Q9) is ABSENT from Mixpanel; this import event is the only campaign-creation signal here. |
 | `Created Campaign Requirements` | Campaign-tracker family, server-side import; no codebase emitter (Q24). |
 | `Campaign Requirement Approval` | Campaign-tracker family, server-side import; no codebase emitter (Q24). |

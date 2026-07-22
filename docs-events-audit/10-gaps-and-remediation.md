@@ -4,6 +4,16 @@
 integrity/correctness, P2 = hygiene/security, P3 = capability. Effort:
 S (<1d) / M (1–3d) / L (1w+). Items marked 🔒 depend on an open question.
 
+> ⚠ **Correction 2026-07-22 (see REFRESH-NOTES-2026-07-22.md §1):** "Batch 1
+> executed" below means the changes were built and tested **in the audit
+> session's local checkout only** and captured as patches
+> (`discovery-imai-patches/0005`). **None of R1/R2/R8/R9/R10/R16/R21 are
+> merged into Discovery-imai** (verified absent at HEAD `da98fcf2`). Treat
+> every ✅ below as "patch ready, unmerged". Whether prod ever ran this code
+> out-of-band is Q29. To land them: re-author against HEAD (line numbers
+> drifted; 0005's secrets are redacted — see discovery-imai-patches/README.md)
+> and merge through the team's normal PR flow.
+
 **Batch 1 executed 2026-07-20** (backend build green; users/payments/lists
 suites pass; new guardrail test passes):
 - ✅ R1 — proxy emitter gated (`NODE_ENV==='production' && !STAGING`;

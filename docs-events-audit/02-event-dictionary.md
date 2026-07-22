@@ -1,7 +1,9 @@
 # 02 — Server-Side Event Dictionary (Sprint 2)
 
-**Status:** Draft v1 — derived from code audit 2026-07-20. Volumes/fill-rates
-pending logs-DB access ([Q14](./OPEN_QUESTIONS.md)).
+**Status:** Draft v2 — derived from code audit 2026-07-20, refreshed 2026-07-22
+against HEAD `da98fcf2` (all file:line refs re-verified; event set unchanged —
+see REFRESH-NOTES.md). Volumes/fill-rates pending logs-DB access
+([Q14](./OPEN_QUESTIONS.md)).
 **Scope:** every event POSTed to `CLOSE_WEBHOOK_URL` by the three server
 emitters (see [03-emitters.md](./03-emitters.md)). Client-side tags are
 Sprint 3. Event *semantics* caveats marked ⚠ are imported from
@@ -10,7 +12,7 @@ data (dates noted there).
 
 **Payload conventions** (apply to every backend/main event unless noted):
 - The emitter auto-enriches with `name`, `email`, `main_user_id` (looked up
-  from the user; see users.service.ts:3729). `user_id` + `event` are always
+  from the user; see users.service.ts:3733). `user_id` + `event` are always
   present. Extra fields below are per-call-site additions.
 - `amount` is **whole USD** (⚠ not cents); Israel-billed charges are
   multiplied by 1.17 (VAT) before emission on some paths (noted per event).
@@ -28,12 +30,12 @@ data (dates noted there).
 
 | Event | Trigger | Emitter | Extra payload | Destinations | Caveats |
 |---|---|---|---|---|---|
-| `signup` | Self-serve registration completes | users.service.ts:3041 | `email, name, utm, phone` | E M K(list ×4 + `Signup` metric TgdFj8) C | ⚠ Admin-created users skip this — never compute funnels without excluding `user_created_by_admin` accounts. Klaviyo has 4 duplicate `signup` lists — aggregate by name. |
+| `signup` | Self-serve registration completes | users.service.ts:3046 (2nd path :3054) | `email, name, utm, phone` | E M K(list ×4 + `Signup` metric TgdFj8) C | ⚠ Admin-created users skip this — never compute funnels without excluding `user_created_by_admin` accounts. Klaviyo has 4 duplicate `signup` lists — aggregate by name. ⚠ Since 2026-07-21 Gmail signups (via Google) are allowed again (business-email gate disabled, users.controller.ts:422-438) — email-domain mix shifts on that date. |
 | `user_created_by_admin` | Admin creates account (sales) | users.controller.ts:131 | `email, name, admin_user_id` | E M | Marks accounts that skip the self-serve funnel. |
 | `team_member_added` | Team member invited/added (2 paths) | users.controller.ts:219, :318 | `team_member_email` | E M K | ⚠ Team members get their own `user_id`; roll up via `main_user_id` for account-level analysis. |
-| `user_logged_in` | Login succeeds | users.controller.ts:1014 | — | E M | ⚠ The ONLY session proxy — "sessions/day" = logins/day; there is no sessions table. |
-| `finished_onboarding` | Onboarding KYC completed (only if `inviteTeamMembers` step reached) | users.controller.ts:1770 | — | E M | ⚠ Onboarding is skippable (users can go straight to /trial) — NOT a mandatory funnel edge. |
-| `scheduled_forced_onboarding_tehilla` | Forced-onboarding booking flow | users.service.ts:4468 | — | E M | Named for a CS rep; taxonomy-cleanup candidate (Sprint 5). |
+| `user_logged_in` | Login succeeds | users.controller.ts:1020 | — | E M | ⚠ The ONLY session proxy — "sessions/day" = logins/day; there is no sessions table. |
+| `finished_onboarding` | Onboarding KYC completed (only if `inviteTeamMembers` step reached) | users.controller.ts:1777 | — | E M | ⚠ Onboarding is skippable — NOT a mandatory funnel edge. ⚠ **Since 2026-07-21 IMAI signups skip /get-started entirely** (`skipOnboardingLabels` includes 'imai') — expect this event's volume to collapse from that date; a trend break there is a measurement change. |
+| `scheduled_forced_onboarding_tehilla` | Forced-onboarding booking flow | users.service.ts:4473 | — | E M | Named for a CS rep; taxonomy-cleanup candidate (Sprint 5). |
 
 ## 2. Lifecycle — trial
 
@@ -42,7 +44,7 @@ data (dates noted there).
 | `new_subscription_trial` | Trial starts (card accepted) | payments.service.ts:1634 | `email, name, amount` | E M K(`New Trial` T47iri — matches E ≈99%) C | Trials are 7 days. Trial start anchor = `min(date)` per user. |
 | `free_trial_blocked` | Card entered but user blocked (abuse prevention) | payments.service.ts:1545 | `email, name, error` | E M K | Fires alongside a Slack alert (B052AN3HQL8). |
 | `new_trial_email_failed` | Trial welcome email throws | payments.service.ts:1622 | `email, name` | E M | Operational, not behavioral. |
-| `cancel_trial` | Cancel while `endTrial` still set | users.service.ts:2190 (ternary) | `email, name, subscription_type='trial', cancellation_reason?` | E M K(single-event routing: cancelers land ONLY here, not in cancel_subscription lists) | ⚠ Exists only since **2026-04-22**; before that ALL trial cancels emitted `cancel_subscription`. ⚠ ~20/month trial users with expired `endTrial` still emit `cancel_subscription` today — complete trial-churn = union of both, deduped per user. |
+| `cancel_trial` | Cancel while `endTrial` still set | users.service.ts:2195 (ternary) | `email, name, subscription_type='trial', cancellation_reason?` | E M K(single-event routing: cancelers land ONLY here, not in cancel_subscription lists) | ⚠ Exists only since **2026-04-22**; before that ALL trial cancels emitted `cancel_subscription`. ⚠ ~20/month trial users with expired `endTrial` still emit `cancel_subscription` today — complete trial-churn = union of both, deduped per user. |
 | `trial_charge_exception` | Trials cron charge attempt throws | tasks/tasks.service.ts:376 | `email, name, error` | E M | Operational. |
 
 ## 3. Lifecycle — payment & churn
@@ -55,31 +57,31 @@ data (dates noted there).
 | `upgrade_package_payment` | Plan upgrade charged (Stripe :1349 / Cardcom :1410) | payments.service.ts | `email, name, amount` (Cardcom IL ×1.17) | E M | Counts as a payment event for prior-payment churn filters. |
 | `duplicate_charge_prevented` | Idempotency guard blocks a double charge | payments.service.ts:2084 | `subscription_id` | E M | Operational. |
 | `manual_subscription_purchase_blocked` | Manual-payment account tries self-serve purchase | payments.controller.ts:150 | `subscription_id, package_id` | E M | |
-| `started_cancellation_process` | User enters cancel flow | users.controller.ts:2343 | `email` | E M | Churn-INTENT signal — many don't finish. ⚠ Pollutes `trial_analytics_report.cancel_date` (that view counts any `%cancel%` event). |
-| `cancel_subscription` | Cancel when `endTrial` NOT set (else `cancel_trial`) | users.service.ts:2190 (ternary) | `email, name, subscription_type='paying', cancellation_reason?` | E M K C | ⚠ NOT "paying churn" by itself — ~72% of last year's emitters were still in trial (legacy path). Paying churn requires a prior-payment EXISTS filter (recipe in SCHEMA.md). |
+| `started_cancellation_process` | User enters cancel flow | users.controller.ts:2349 | `email` | E M | Churn-INTENT signal — many don't finish. ⚠ Pollutes `trial_analytics_report.cancel_date` (that view counts any `%cancel%` event). |
+| `cancel_subscription` | Cancel when `endTrial` NOT set (else `cancel_trial`) | users.service.ts:2195 (ternary) | `email, name, subscription_type='paying', cancellation_reason?` | E M K C | ⚠ NOT "paying churn" by itself — ~72% of last year's emitters were still in trial (legacy path). Paying churn requires a prior-payment EXISTS filter (recipe in SCHEMA.md). |
 | `cancel_subscription_after_ai_agent_call` | Cancel completed after AI-agent retention call | (in imai_events; emitter in cancel flow) | — | E M | Related retention-flow marker. |
-| `deactivate_account` | Account deactivated | users.service.ts:2391 | `email, name` | E M | |
+| `deactivate_account` | Account deactivated | users.service.ts:2396 | `email, name` | E M | |
 
 The cancel flow ALSO posts a rich payload (reason, competitor, message,
 subscription_amount) to make.com via `CANCELLATION_WEBHOOK_URL`
-(users.service.ts:2262) and a Slack notice — parallel channels, not
+(users.service.ts:2266) and a Slack notice — parallel channels, not
 imai_events (see 03-emitters.md §4).
 
 ## 4. Product usage
 
 | Event | Trigger | Emitter | Extra payload | Destinations | Caveats |
 |---|---|---|---|---|---|
-| `influencer_discovery_search` | User-initiated discovery search | **proxy** index.js:292 (`userInitiated===true`) + backend Influencer.controller.ts:53 (search-data), :75 (linkedin), :97 (snapchat) | proxy adds `email, user_id, name` itself | E M | ⚠ ~2.8M rows — always aggregate, never scan. ⚠ Proxy emitter is NOT prod-gated (Q10). Health-score input. |
-| `influencer_discovery_search_paginated` | Pagination of a search | proxy index.js:299 (`userPaginated===true`) | same | E M | Volume event; excluded from most engagement definitions. |
+| `influencer_discovery_search` | User-initiated discovery search | **proxy** index.js:292 (`userInitiated===true`) + backend Influencer.controller.ts:53 (search-data), :75 (linkedin), :97 (snapchat) | proxy adds `email, user_id, name` itself | E M | ⚠ ~2.8M rows — always aggregate, never scan. ⚠ Proxy emitter is NOT prod-gated (Q10 — the R1 patch was never merged; re-verified at da98fcf2). Health-score input. ⚠ The 2026-07-21 trial search-session window changes trial search *counts* (subscription_count) but NOT this event — it still fires per user-initiated API call. |
+| `influencer_discovery_search_paginated` | Pagination of a search | proxy index.js:300 (`userPaginated===true`) | same | E M | Volume event; excluded from most engagement definitions. |
 | `created_report` | Influencer report created | reports/report.controller.ts:118 | `email, name` | E M | ⚠ Excluded from the health-score event set (`event <> 'created_report'`). |
 | `report_creation_attempt` | Report requested (before success) | report.controller.ts:93 | `email, name` | E M | Pair with `created_report`/`report_creation_failed` for failure-rate. |
 | `report_creation_failed` | Report generation failed | report.controller.ts:101 | `email, name` | E M | |
 | `first_report_created` | First-ever report (quota.count===0) | report.controller.ts:125 | `email, name` | E M K(list + activation flows) | **Activation milestone** — canonical "activated trial" definition. |
-| `created_campaign` + `campaign_created` | Campaign created (BOTH fire) | campaigns.controller.ts:339 and :356 | :339 adds `email, name`; :356 none | E M | ⚠ Duplicate pair — Q9. Which one downstream consumers use is unconfirmed. |
+| `created_campaign` + `campaign_created` | Campaign created (BOTH fire) | campaigns.controller.ts:339 and :356 | :339 adds `email, name`; :356 none | E M | ⚠ Duplicate pair — Q9 (re-verified at da98fcf2: both still fire). Which one downstream consumers use is unconfirmed. |
 | `first_campaign_created` | First-ever campaign (quota.count===0) | campaigns.controller.ts:346 | `email, name` | E M K | Activation milestone. |
 | `influencer_added_to_campaign` | Influencer added (UI :833; bulk API per-item campaigns-api.service.ts:242) | campaigns.controller.ts:833 | — | E M | Health-score input ("Added Influencer to Campaign" naming variant in Mixpanel — Sprint 4 to map). |
 | `first_list_created` | First-ever list (quota.count===0) | lists/list.controller.ts:273 | `email, name` | E M K | Activation milestone. |
-| `created_list` | List created (every time) | lists/list.controller.ts (added 2026-07-20, remediation R16) | `email, name` | E M | ⚠ New event — no history before 2026-07 deploy. |
+| ~~`created_list`~~ | ~~List created (every time)~~ | **DOES NOT EXIST at HEAD** — the R16 patch (2026-07-20) was never merged into Discovery-imai; there is no `created_list` emitter in the repo | — | — | ⚠ If `created_list` rows appear in imai_events, the prod VM is running out-of-band patched code (see REFRESH-NOTES.md §1 / Q29). |
 | `created_geo_analysis` | Geo analysis created | geo/geo.controller.ts:111 | — | E M | |
 | `regenerated_geo_analysis` | Geo analysis re-run | geo/geo.controller.ts:389 | — | E M | |
 | `pr_journalist_search` | PR module journalist search | entity/controllers/journalist.controller.ts:60 | — | E M | |
@@ -95,22 +97,28 @@ imai_events (see 03-emitters.md §4).
 
 ⚠ Any trend crossing 2026-06-30 is a measurement change, not behavior change.
 Server-side family is **deduped once per user+event per day** (cache in
-`sendTrialPipeDriveEvent`, users.service.ts:1652).
+`sendTrialPipeDriveEvent`, users.service.ts:1657).
 
 | Family | Trigger | Emitter | Extra payload |
 |---|---|---|---|
-| `trial_{feature}_daily_limit_reached` / `..._day{N}` (N = trial day 1–7) | Daily quota hit during trial | users.service.ts:1713 (via `firePipeDriveTrialLimit`) | `feature, period, count, limit, trial_day?` — note `reports`→`report` rename |
-| `trial_{feature}_total_limit_reached` | Total trial quota hit | users.service.ts:1702 | same |
-| `trial_feature_blocked` | Gated feature attempted | users.service.ts:1936 | `feature, cta` |
-| `trial_upgrade_<placement>` | Upgrade CTA clicked; placement baked into the NAME | frontend → `POST users/pipedrive/trial-event` (users.controller.ts:2382) | `source` — placements: `top_bar, sidebar_workspace, sidebar_operations, list_banner, search_banner, campaign_list_banner, campaign_demo, report_download, report_add_to_list, influencer_report_banner, sl_list_banner, locked_403, limit_search_daily, limit_reports_daily, search_limit_empty_state` (aggregate `LIKE 'trial_upgrade_%'`) |
+| `trial_{feature}_daily_limit_reached` / `..._day{N}` (N = trial day 1–7) | Daily quota hit during trial | users.service.ts:1719-1721 (via `firePipeDriveTrialLimit` :1694) | `feature, period, count, limit, trial_day?` — note `reports`→`report` rename |
+| `trial_{feature}_total_limit_reached` | Total trial quota hit | users.service.ts:1707 | same |
+| `trial_feature_blocked` | Gated feature attempted | users.service.ts:1940 | `feature, cta` |
+| `trial_upgrade_<placement>` | Upgrade CTA clicked; placement baked into the NAME | frontend → `POST users/pipedrive/trial-event` (users.controller.ts:2367) | `source` — placements: `top_bar, sidebar_workspace, sidebar_operations, list_banner, search_banner, campaign_list_banner, campaign_demo, report_download, report_add_to_list, influencer_report_banner, sl_list_banner, locked_403, limit_search_daily, limit_reports_daily, search_limit_empty_state` (aggregate `LIKE 'trial_upgrade_%'`) |
 | `trial_unlock_modal_opened` | Unlock modal shown (highest-volume intent signal) | same frontend bridge | `source` |
 | `trial_book_call_clicked` / `_sidebar` / `_top_bar` | Book-a-call CTA | same | `source`; opens Calendly |
 | `trial_sample_report_viewed` | Sample report viewed | same | `feature` (`social_listening`, `campaign`) |
 
-The frontend bridge whitelist (backend, users.controller.ts:2382): prefixes
+The frontend bridge whitelist (backend, users.controller.ts:2367-2388): prefixes
 `trial_upgrade_`, `trial_book_call_`, `trial_unlock_modal_`,
 `trial_sample_report_` + regex `^[a-z][a-z0-9_]{0,63}$`. Guarded client-side
 to trial users only (trial-gating.service.ts:49); errors swallowed both sides.
+
+⚠ **Related but distinct (2026-07-21):** trial *search* quota enforcement now
+applies a search-session window (`SEARCH_COUNT_WINDOW_SECONDS`, code default
+50 s; see 03-emitters.md §3) — the limit-reached family fires later in a
+refinement session than before, since refinements inside the window no longer
+consume quota.
 
 ## 6. Sales/CRM mirror events (in imai_events but NOT emitted by the platform)
 
@@ -131,6 +139,8 @@ Document-blocked until the emitter is found.
 
 ## 8. Validation status
 
-Code-derived only. Pending Q14 (logs-DB read access):
-per-event 90-day volumes, payload fill rates, dead-event detection, and
-discovery of any event names in imai_events not covered above.
+Code-derived only. Refresh 2026-07-22: full emitter sweep at `da98fcf2`
+confirms **no events added or removed** since df73c535 (and `created_list`
+removed from this dictionary — never merged). Still pending Q14 (logs-DB read
+access): per-event 90-day volumes, payload fill rates, dead-event detection,
+and discovery of any event names in imai_events not covered above.

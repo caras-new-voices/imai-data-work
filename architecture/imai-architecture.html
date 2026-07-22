@@ -23,6 +23,7 @@
   h3{font-size:15px;margin:18px 0 8px}
   .sub{color:var(--muted);margin:0 0 14px}
   .prov{background:var(--chip);border:1px solid var(--line);border-left:4px solid var(--warn);padding:10px 14px;border-radius:8px;font-size:13.5px;margin:14px 0}
+  .alert{background:var(--chip);border:1px solid var(--danger);border-left:4px solid var(--danger);padding:10px 14px;border-radius:8px;font-size:13.5px;margin:14px 0}
   code{font-family:var(--mono);font-size:12.5px;background:var(--chip);padding:1px 5px;border-radius:4px}
   .cols{display:flex;gap:14px;flex-wrap:wrap}
   .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;flex:1 1 300px;min-width:280px}
@@ -64,9 +65,11 @@
 <div class="wrap">
 
 <h1>IMAI — Platform Architecture Map</h1>
-<p class="sub">InfluencerMarketing.ai · repo <code>InfluencerMarketing-Ai/Discovery-imai</code> · generated 2026-07-21 · machine-readable twin: <code>architecture/imai-architecture.json</code></p>
+<p class="sub">InfluencerMarketing.ai · repo <code>InfluencerMarketing-Ai/Discovery-imai</code> · refreshed 2026-07-22 against HEAD <code>da98fcf2</code> · machine-readable twin: <code>architecture/imai-architecture.json</code></p>
 
-<div class="prov"><b>Provenance:</b> built from the 2026-07-20/21 full code audit of Discovery-imai @ <code>df73c535</code> (docs in <code>docs-events-audit/</code>), live DNS/HTTP probes, and live Mixpanel measurement — not from a fresh code scan (this session cannot attach the app repo). File:line references are from <code>df73c535</code> and may drift. Anything <span class="danger">dashed/red</span> is presumed, with its open-question id (<span class="qq">Qn</span>) in <code>docs-events-audit/OPEN_QUESTIONS.md</code>.</div>
+<div class="prov"><b>Provenance:</b> refresh of the 2026-07-20/21 full code audit. Every file:line reference on this page was <b>re-verified against live HEAD <code>da98fcf2</code> (2026-07-22)</b> in a read-only session on the app repo; 25 commits since the prior baseline <code>df73c535</code> reviewed (details: <code>docs-events-audit/REFRESH-NOTES.md</code>). DNS/HTTP-probe and Mixpanel facts carry over from 2026-07-20/21. Anything <span class="danger">dashed/red</span> is presumed, with its open-question id (<span class="qq">Qn</span>) in <code>docs-events-audit/OPEN_QUESTIONS.md</code>.</div>
+
+<div class="alert"><b>⚠ Remediation reality check (2026-07-22):</b> the audit's R-series patches (R1 proxy prod-gate, R2 GA4 gating, R8 env-first secrets, R16 <code>created_list</code>, R21 CI guardrail) are <b>NOT merged into Discovery-imai</b> — they exist only in <code>discovery-imai-patches/</code> in the docs repo. At HEAD the proxy emitter has <b>no environment gate</b> (<span class="qq">Q10</span> live), the GA4 MP secret is hardcoded, all Slack/make.com/Bubble hooks are hardcoded, <code>created_list</code> never fires, and there is no event-dictionary CI spec. This page describes the repo <em>as it is</em>.</div>
 
 <h2>1. The system at a glance</h2>
 <div class="flow">
@@ -82,8 +85,8 @@
   <div class="lane">
     <h3>Application — all Google Cloud <span class="tag gcp">GCE discovery-prod/-stag · "Leaders Prod" · pm2</span> <span class="tag gcp">Cloud Run</span> <span class="tag gcp">GCS</span></h3>
     <div class="boxes">
-      <div class="node gcp"><b>backend/main</b><small>NestJS. users · payments (Stripe+Cardcom, trial, abuse gate) · reports · campaigns · lists · geo · PR/entity · tracking (conversion receiver) · ai-usage · usage-ai catalog · mail</small></div>
-      <div class="node gcp"><b>proxy</b><small>Express. Search/reports API front + usage metering to Postgres on EVERY response (billing tables — parallel usage truth). CORS effectively open (<span class="qq">Q22</span>)</small></div>
+      <div class="node gcp"><b>backend/main</b><small>NestJS. users · payments (Stripe+Cardcom, trial, abuse gate) · reports · campaigns (+Phyllo status via pixel-DB phyllo_webhooks) · lists · geo · PR/entity · tracking (conversion receiver) · ai-usage · usage-ai catalog · mail</small></div>
+      <div class="node gcp"><b>proxy</b><small>Express. Search/reports API front + usage metering to Postgres on EVERY response (billing tables — parallel usage truth). CORS effectively open (<span class="qq">Q22</span>); emitter UNGATED (<span class="qq">Q10</span>)</small></div>
       <div class="node gcp"><b>backend/social-listening</b><small>NestJS. Segments, mentions, trends pipeline</small></div>
       <div class="node gcp"><b>backend/brand-safety</b><small>AI reports; cost → ai_usage; callback → main</small></div>
       <div class="node gcp"><b>campaign-tracker</b><small>Cloud Run. Post-metrics scraper</small></div>
@@ -103,12 +106,12 @@
   <div class="lane">
     <h3>Data stores &amp; destinations</h3>
     <div class="boxes">
-      <div class="node gcp"><b>prod Postgres</b><small>users · <b>user_payments</b> (self-serve revenue TRUTH) · campaign conversion tables · client_domains · ai_usage</small></div>
-      <div class="node unk"><b>logs/"pixel" Postgres</b><small>imai_events ~4.6M rows · reporting views · google_ads_* — host unknown <span class="qq">Q3</span></small></div>
+      <div class="node gcp"><b>prod Postgres</b><small>users · <b>user_payments</b> (self-serve revenue TRUTH) · campaign conversion tables · client_domains · ai_usage · subscription_count (+lastCountedAt 2026-07) · influencer (+phyllo_status 2026-07)</small></div>
+      <div class="node unk"><b>logs/"pixel" Postgres</b><small>imai_events ~4.6M rows · reporting views · google_ads_* · phyllo_webhooks — host unknown (<span class="qq">Q3</span>), but backend/main holds PIXEL_DB_* creds (campaigns.service.ts:1114)</small></div>
       <div class="node ext"><b>Mixpanel 3432835</b><small>104 events / 4 namespaces (see §4) — Lexicon documented 2026-07-21</small></div>
       <div class="node ext"><b>Klaviyo</b><small>7 metrics + ~97 event lists (~10% loss <span class="qq">Q5</span>)</small></div>
       <div class="node ext"><b>Close CRM</b><small>Manual/enterprise deals = MAJORITY of paying accounts; stages mirror BACK into imai_events <span class="qq">Q6</span></small></div>
-      <div class="node ext"><b>GA4 / Ads / Clarity</b><small>client events + server-side MP purchase (hardcoded client_id <span class="qq">Q11</span>)</small></div>
+      <div class="node ext"><b>GA4 / Ads / Clarity</b><small>client events + server-side MP purchase (hardcoded client_id + api_secret, ungated <span class="qq">Q11</span>)</small></div>
     </div>
   </div>
 </div>
@@ -121,14 +124,14 @@
 
 <h2>2. Services (monorepo layout)</h2>
 <div class="scroll"><table>
-  <tr><th>Path</th><th>Stack</th><th>Role</th><th>Load-bearing files</th></tr>
-  <tr><td><code>backend/main</code></td><td>NestJS/TS</td><td>Primary API: auth/teams, payments (Stripe+Cardcom, 7-day trial, abuse gate), reports, campaigns, lists, geo, PR, conversion-tracking receiver, AI cost accounting, internal analytics catalog</td><td><code>users.service.ts:3729</code> webhook emitter · <code>payments.service.ts:1545</code> abuse gate / <code>:1634</code> trial / <code>:500,1710,2210</code> conversion / <code>:1798</code> GA4 MP · <code>users.controller.ts:2382</code> trial bridge · <code>usage-board.service.ts:1909</code> health score</td></tr>
-  <tr><td><code>proxy</code></td><td>Express/JS</td><td>API front + metering: writes billing/usage rows on every proxied response (package types 1=Search 2=Reports 4=SL 6=Overlap); emits the 2 highest-volume events</td><td><code>index.js:112</code> emitter · <code>:292/:299</code> search events · <code>:327-497</code> metering · <code>allowed-domain.prod.js</code> dead CORS list (<span class="qq">Q22</span>)</td></tr>
+  <tr><th>Path</th><th>Stack</th><th>Role</th><th>Load-bearing files (verified @ da98fcf2)</th></tr>
+  <tr><td><code>backend/main</code></td><td>NestJS/TS</td><td>Primary API: auth/teams, payments (Stripe+Cardcom, 7-day trial, abuse gate), reports, campaigns, lists, geo, PR, conversion-tracking receiver, AI cost accounting, internal analytics catalog</td><td><code>users.service.ts:3733</code> webhook emitter · <code>payments.service.ts:1545</code> abuse gate / <code>:1634</code> trial / <code>:500,1710,2210</code> conversion / <code>:1789-1810</code> GA4 MP · <code>users.controller.ts:2367</code> trial bridge · <code>users.service.ts:1810</code> search-session window (NEW) · <code>usage-ai/services/usage-board.service.ts:1909</code> health score</td></tr>
+  <tr><td><code>proxy</code></td><td>Express/JS</td><td>API front + metering: writes billing/usage rows on every proxied response (package types 1=Search 2=Reports 4=SL 6=Overlap); emits the 2 highest-volume events — <span class="danger">emitter has NO env gate at HEAD</span> (<span class="qq">Q10</span>)</td><td><code>index.js:112</code> emitter · <code>:292/:300</code> search events · <code>:327-518</code> metering (trial-gated searches now skipped — backend counts them) · <code>allowed-domain.prod.js</code> dead CORS list (<span class="qq">Q22</span>)</td></tr>
   <tr><td><code>backend/social-listening</code></td><td>NestJS/TS</td><td>SL segment pipeline</td><td><code>social-listening-users.service.ts:36</code> emitter · <code>segment-timing.service.ts:43/:195</code></td></tr>
   <tr><td><code>backend/brand-safety</code></td><td>Node</td><td>AI brand-safety reports</td><td>cost → <code>ai_usage</code>; callback <code>/brand-safety-report/:id/complete</code></td></tr>
   <tr><td><code>backend/cloud/campaign-tracker</code></td><td>Cloud Run</td><td>Campaign post-metrics scraper</td><td>—</td></tr>
-  <tr><td><code>front/imai</code></td><td>Angular</td><td>Web app + 4 tracking layers + 2 backend bridges; served to ~50 white-label domains</td><td><code>index.html:26/:40</code> GTM ×2 · <code>main.ts:198</code> GA4 · <code>trial-gating.service.ts:49</code> bridge</td></tr>
-  <tr><td><code>sdk/</code></td><td>JS + plugins</td><td>CUSTOMER conversion pixel (brands' stores): pixel.js + Shopify web-pixel + WooCommerce plugin → <code>/tracking/*</code> → clickId→coupon→IP attribution → campaign tables</td><td><code>sdk/pixel.js</code> · <code>tracking.controller.ts</code></td></tr>
+  <tr><td><code>front/imai</code></td><td>Angular</td><td>Web app + 4 tracking layers + 2 backend bridges; served to ~50 white-label domains. Since 2026-07-21 IMAI signups skip onboarding (straight to /trial) and Gmail-via-Google is allowed</td><td><code>index.html:26/:40</code> GTM ×2 · <code>main.ts:198</code> GA4 · <code>trial-gating.service.ts:49</code> bridge</td></tr>
+  <tr><td><code>sdk/</code></td><td>JS + plugins</td><td>CUSTOMER conversion pixel (brands' stores): pixel.js + Shopify web-pixel + WooCommerce plugin → <code>/tracking/*</code> → clickId→coupon→IP attribution → campaign tables (unchanged since df73c535)</td><td><code>sdk/pixel.js</code> · <code>tracking.controller.ts</code></td></tr>
   <tr><td><code>deploy/</code></td><td>Node</td><td>pm2 deploy to GCE; announces to Slack</td><td><code>deploy/deploy.js</code></td></tr>
   <tr><td class="danger">not in repo</td><td>?</td><td><code>backend/scraper</code>, <code>backend/frontend-logger</code> run on the prod VM outside version control</td><td><span class="qq">Q8</span></td></tr>
 </table></div>
@@ -136,17 +139,18 @@
 <h2>3. The event pipeline (how behavior becomes data)</h2>
 <ul>
   <li><b>Three emitters, one contract:</b> fire-and-forget <code>axios POST</code> to <code>CLOSE_WEBHOOK_URL</code> ("PipeDrive" in code is a legacy misnomer — it's the Close webhook). <span class="danger">No retry, no queue, no dead-letter anywhere</span> — every downstream gap (Mixpanel loss, Klaviyo ~10%, April-2026 thin patch) is consistent with best-effort delivery.</li>
+  <li><b>Gating is inconsistent:</b> backend/main + social-listening gate on <code>NODE_ENV==='prod'</code>; <span class="danger">the proxy emitter is not gated at all</span> (<span class="qq">Q10</span> — the R1 patch was never merged).</li>
   <li><b>White-label:</b> per-label URLs (<code>CLOSE_WEBHOOK_URL_&lt;LABEL&gt;</code>) but tenant identity is <em>stripped from payloads</em> → reseller traffic is indistinguishable downstream (<span class="qq">Q13</span>).</li>
-  <li><b>~55 named events + dynamic families</b> — full dictionary with caveats per event: <code>docs-events-audit/02-event-dictionary.md</code>; Mixpanel-side meanings: <code>12-mixpanel-lexicon.md</code>.</li>
-  <li><b>Parallel side channels:</b> GA4 MP server <code>purchase</code> (<span class="qq">Q11</span>), make.com cancellation hook, Slack alerts ×5 families, Bubble ip-capture/blocked-signup, proxy billing tables (a second usage truth unaffected by webhook loss), <code>ai_usage</code> cost table.</li>
+  <li><b>~55 named events + dynamic families</b> — full dictionary with caveats per event: <code>docs-events-audit/02-event-dictionary.md</code>; Mixpanel-side meanings: <code>12-mixpanel-lexicon.md</code>. Event set unchanged df73c535→da98fcf2; <code>created_list</code> has <span class="danger">no emitter in the repo</span> (R16 unmerged).</li>
+  <li><b>Parallel side channels:</b> GA4 MP server <code>purchase</code> (<span class="qq">Q11</span>), make.com cancellation hook, Slack alerts ×5 families (hooks hardcoded), Bubble ip-capture/blocked-signup, Phyllo creator-auth webhooks INBOUND via pixel-DB <code>phyllo_webhooks</code>, proxy billing tables (a second usage truth unaffected by webhook loss), <code>ai_usage</code> cost table.</li>
 </ul>
 
 <h2>4. Mixpanel: four namespaces, one project (3432835)</h2>
 <div class="scroll"><table>
   <tr><th>Namespace (Lexicon tag)</th><th>Shape</th><th>Source</th><th>Trap</th></tr>
   <tr><td><code>webhook-pipeline</code></td><td>snake_case</td><td>the pipeline above</td><td>ALL payload props stripped (<span class="qq">Q27</span>); renames: <code>new_subscription_trial</code>→"Free Trial Signup", <code>cancel_subscription</code>→"Cancelled Subscription"</td></tr>
-  <tr><td><code>server-import</code></td><td>Title-Case</td><td>$import batch job, source unidentified (<span class="qq">Q24</span>)</td><td>highest volume (Platform Usage ~1.6M/30d); DUPLICATES snake events — "Login"≈<code>user_logged_in</code>, "Influencer Search" vs <code>influencer_discovery_search</code> 41% apart (<span class="qq">Q25</span>)</td></tr>
-  <tr><td><code>stripe-integration</code></td><td>Title-Case</td><td>Stripe→Mixpanel integration</td><td>Payment Attempt = ALL charges incl. renewals/dunning — not a funnel step; Amount Charged = whole USD, usable for Stripe-engine dollars pending completeness check (<span class="qq">Q28</span>)</td></tr>
+  <tr><td><code>server-import</code></td><td>Title-Case</td><td>$import batch job, source unidentified (<span class="qq">Q24</span>; no in-repo emitter, re-confirmed @ HEAD)</td><td>highest volume (Platform Usage ~1.6M/30d); DUPLICATES snake events — "Login"≈<code>user_logged_in</code>, "Influencer Search" vs <code>influencer_discovery_search</code> 41% apart (<span class="qq">Q25</span>)</td></tr>
+  <tr><td><code>stripe-integration</code></td><td>Title-Case</td><td>Stripe→Mixpanel integration (no in-repo code)</td><td>Payment Attempt = ALL charges incl. renewals/dunning — not a funnel step; Amount Charged = whole USD, usable for Stripe-engine dollars pending completeness check (<span class="qq">Q28</span>)</td></tr>
   <tr><td><code>crm-mirror</code></td><td>Stage names</td><td>Close pipeline mirror</td><td>no <code>status_id</code> → Sales vs CS ambiguous (<span class="qq">Q6</span>); never count as product usage</td></tr>
 </table></div>
 
@@ -155,12 +159,12 @@
   <tr><th>"Pixel"</th><th>What it is</th><th>Data lands in</th></tr>
   <tr><td>Customer conversion SDK</td><td><code>sdk/pixel.js</code> on customers' stores (Shopify/Woo/Magento…), cookie <code>_imai_clickid</code></td><td>GCP backend → campaign tables (prod DB)</td></tr>
   <tr><td>Legacy AWS visit pixel</td><td><code>t.imai.co</code> + S3 <code>pixel.js</code> (373 B, 2023) beaconing UTM/gclid at funnel moments</td><td>AWS API GW → logs DB (presumed, <span class="qq">Q2</span>)</td></tr>
-  <tr><td>"Pixel DB"</td><td>nickname for the logs Postgres</td><td>— (it IS the store: <code>imai_events</code>)</td></tr>
+  <tr><td>"Pixel DB"</td><td>nickname for the logs Postgres (also hosts <code>phyllo_webhooks</code>; backend/main connects via <code>PIXEL_DB_*</code> env)</td><td>— (it IS the store: <code>imai_events</code>)</td></tr>
 </table></div>
 
 <h2>6. Money (for any feature touching revenue)</h2>
 <ul>
-  <li><b>Two engines:</b> self-serve (Stripe + Cardcom-IL; observed price points 99/175/499/599/959/1199-1200 + custom — docs only list 99/499/1200) and sales-led (manual Close deals = <b>majority of paying accounts</b>).</li>
+  <li><b>Two engines:</b> self-serve (Stripe + Cardcom-IL; observed price points 99/175/499/599/959/1199-1200 + custom) and sales-led (manual Close deals = <b>majority of paying accounts</b>). Prices are DB rows, not code config — in code only the DoReel seed ($599) and stale de/es trial copy ($959) carry literals (<span class="qq">Q28</span>).</li>
   <li><b>Revenue truth:</b> prod <code>user_payments</code> (self-serve) + Close (manual). <span class="danger">Webhook events saw ~36% of recurring dollars</span> — never sum them.</li>
   <li><b>Latest measured state</b> (2026-07, Stripe engine only, <span class="qq">Q28</span>): gross fell ~$150.8k→$67.3k/mo Nov→Jun while trial→paid recovered to 20% and payers grew — a plan-mix decline, not a demand problem. Full report: <code>docs-events-audit/13-sales-funnel-report-2026-07.md</code>.</li>
 </ul>
@@ -169,10 +173,11 @@
 <ul>
   <li class="danger">Never push to Discovery-imai from data-work sessions — all docs/analysis go to caras-new-voices/imai-data-work.</li>
   <li>Exclude <code>user_created_by_admin</code> accounts from funnels; roll team members up via <code>main_user_id</code>; calendar-day windows.</li>
-  <li>Event birth dates: <code>cancel_trial</code> 2026-04-22 · <code>trial_*</code> friction 2026-06-30 · <code>created_list</code> 2026-07 — trends crossing them are measurement changes.</li>
-  <li><code>created_campaign</code> AND <code>campaign_created</code> both fire (<span class="qq">Q9</span>); <code>payment_failed</code> is dunning noise (count distinct users); <code>trial_analytics_report.cancel_date</code> counts any %cancel% event.</li>
+  <li>Event birth dates: <code>cancel_trial</code> 2026-04-22 · <code>trial_*</code> friction 2026-06-30 · <code>created_list</code>: <span class="danger">no emitter in the repo</span> (R16 unmerged) — trends crossing these dates are measurement changes.</li>
+  <li><b>NEW 2026-07-21 measurement changes:</b> trial search counting gained a search-session window (<code>SEARCH_COUNT_WINDOW_SECONDS</code>, code default 50s — its comment wrongly says 300s) and the proxy stopped double-counting trial-gated searches → counted trial searches drop from that date (webhook <code>influencer_discovery_search</code> unaffected). IMAI signups skip onboarding → <code>finished_onboarding</code> / GTM <code>successful_onboarding_completed</code> collapse; Gmail signups allowed again.</li>
+  <li><code>created_campaign</code> AND <code>campaign_created</code> both fire (<span class="qq">Q9</span>, re-verified @ HEAD); <code>payment_failed</code> is dunning noise (count distinct users); <code>trial_analytics_report.cancel_date</code> counts any %cancel% event.</li>
   <li>Amounts are whole USD; IL ×1.17 VAT on some paths; Close deal values are cents.</li>
-  <li>proxy prod convention is <code>production</code>, backend/main's is <code>prod</code> — check before adding env gates.</li>
+  <li>proxy prod convention is <code>production</code>, backend/main's is <code>prod</code> — and the proxy emitter currently has no gate at all. Check before adding env gates.</li>
   <li>Raw email flows into GTM dataLayer / Clarity / Segment; ~50 white-label domains load IMAI tags; no CMP found in code (<span class="qq">Q12/Q15</span>).</li>
   <li>Abuse gate blocks ~31% of card-enterers (US 22%, UK 31%, PH 49%, Apr–Jul 2026) — block reasons only in the logs DB (<span class="qq">Q27</span>).</li>
 </ul>
@@ -180,16 +185,17 @@
 <h2>8. Top open questions (full register: OPEN_QUESTIONS.md, Q1–Q28)</h2>
 <div class="scroll"><table>
   <tr><th>ID</th><th>Unknown</th><th>Why it matters</th></tr>
-  <tr><td class="qq">Q1</td><td>Prod value of <code>CLOSE_WEBHOOK_URL</code> (one grep on discovery-prod)</td><td>Identifies the entire external pipeline — the single highest-leverage unknown</td></tr>
-  <tr><td class="qq">Q2/Q3</td><td>Lambda behind the pixel gateways; logs-DB host + read access</td><td>Unlocks payload-level analysis (abuse-gate reasons, funnel cross-validation)</td></tr>
+  <tr><td class="qq">Q1</td><td>Prod value of <code>CLOSE_WEBHOOK_URL</code> (one grep on discovery-prod — grab <code>PIXEL_DB_*</code> in the same pass for Q3)</td><td>Identifies the entire external pipeline — the single highest-leverage unknown</td></tr>
+  <tr><td class="qq">Q2/Q3</td><td>Lambda behind the pixel gateways; logs-DB host + read access (backend/main's <code>PIXEL_DB_HOST</code> env now points at it)</td><td>Unlocks payload-level analysis (abuse-gate reasons, funnel cross-validation)</td></tr>
   <tr><td class="qq">Q6</td><td>IMAI Close org access (connector reaches NewVoices org)</td><td>Manual/enterprise revenue — the majority of paying accounts</td></tr>
+  <tr><td class="qq">Q10</td><td>Proxy emitter has no env gate (patch unmerged) — is staging polluting <code>imai_events</code>?</td><td>Search events are the highest-volume family; staging noise skews them</td></tr>
   <tr><td class="qq">Q24</td><td>Source of the Mixpanel $import batch</td><td>The platform's highest-volume tracking is unowned</td></tr>
   <tr><td class="qq">Q27</td><td>Sync strips all event payload properties</td><td>Blocks reason/plan/amount breakdowns in Mixpanel</td></tr>
-  <tr><td class="qq">Q28</td><td>Stripe→Mixpanel integration completeness</td><td>Gates trusting the ~55% revenue-decline trend</td></tr>
+  <tr><td class="qq">Q28</td><td>Stripe→Mixpanel integration completeness; plan↔price mapping ($599/$959/$175 are DB rows, not code)</td><td>Gates trusting the ~55% revenue-decline trend</td></tr>
 </table></div>
 
 <footer>
-  Sources: <code>docs-events-audit/01–13</code> (code audit of Discovery-imai @ df73c535, 2026-07-20/21), live DNS/HTTP probes, Mixpanel project 3432835 measured live 2026-07-21. Machine-readable twin for agents: <code>architecture/imai-architecture.json</code>. To regenerate from fresh source: session on Discovery-imai (read-only), re-run EVENTS_AUDIT_PLAN.md Part 1 sweep, update both files here.
+  Sources: <code>docs-events-audit/01–13</code> (code audit @ df73c535, 2026-07-20/21) + read-only refresh @ <code>da98fcf2</code> (2026-07-22, REFRESH-NOTES.md), live DNS/HTTP probes, Mixpanel project 3432835 measured live 2026-07-21. Machine-readable twin for agents: <code>architecture/imai-architecture.json</code>. To regenerate from fresh source: read-only session on Discovery-imai, re-run EVENTS_AUDIT_PLAN.md Part 1 sweep, update both files here.
 </footer>
 </div>
 </body>
