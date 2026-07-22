@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IMAI — How It Works</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><div class="inner">
+  <a class="brand" href="index.html">IMAI · How It Works</a>
+  <nav>
+    <a class="on" href="index.html">Overview</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="events.html">Events &amp; Analytics</a>
+    <a href="features.html">Features</a>
+    <a href="user-flows.html">User Flows</a>
+    <a href="metrics.html">Metrics &amp; Money</a>
+    <a href="open-questions.html">Open Questions</a>
+  </nav>
+</div></header>
+<div class="wrap">
+
+<h1>IMAI — the platform, explained</h1>
+<p class="sub">InfluencerMarketing.ai · knowledge base generated from the full code audit of <code>Discovery-imai</code> (verified at HEAD <code>da98fcf2</code>, 2026-07-22) + live Mixpanel measurement (project 3432835) · maintained in <code>caras-new-voices/imai-data-work</code></p>
+
+<div class="prov"><b>How to read this site:</b> everything here is evidence-based — file:line references were verified against the live repo on 2026-07-22, and every number carries its measurement date. Anything uncertain is tagged with an open-question id (<span class="qq">Q1</span>–<span class="qq">Q29</span>, full register on the <a href="open-questions.html">Open Questions</a> page). Dollar figures are Stripe-engine-only unless stated.</div>
+
+<h2>What IMAI is</h2>
+<p>An influencer-marketing SaaS: brands and agencies <b>discover influencers</b> (search across platforms), generate <b>influencer reports</b> (audience/performance analysis), run <b>campaigns</b> with automatic post tracking, build <b>lists</b>, do <b>geo analysis</b>, <b>PR/journalist outreach</b>, <b>social listening</b>, and <b>brand-safety</b> checks — plus a <b>conversion pixel</b> their e-commerce customers install to attribute sales to influencers. Sold two ways:</p>
+<div class="cols">
+  <div class="card"><h3>Self-serve engine</h3>Stripe (+ Cardcom for Israel). 7-day free trial behind a card wall and an anti-abuse gate; day-7 autocharge converts. Observed price points: $99 / $175 / $499 / $599 / $959 / $1199–1200 + custom (plans are DB rows, not code). The growth funnel — but the minority of paying accounts.</div>
+  <div class="card"><h3>Sales-led engine</h3>Manual/invoiced enterprise deals managed in <b>Close CRM</b> — the <b>majority of paying accounts</b> and most of the dollars. Renewals are relationship-driven; ~280 of 561 manual payers have zero platform events ever. Largely invisible to product analytics.</div>
+</div>
+
+<h2>The state of the business (measured July 2026)</h2>
+<div class="kpis">
+  <div class="kpi"><div class="v">1,527</div><div class="l">signups / month (June)</div></div>
+  <div class="kpi"><div class="v bad">~86%</div><div class="l">of signups never reach the card page (uninstrumented)</div></div>
+  <div class="kpi"><div class="v bad">31%</div><div class="l">of card-enterers blocked by the abuse gate (Apr–Jul)</div></div>
+  <div class="kpi"><div class="v good">20%</div><div class="l">trial→paid, June cohort (best ever: 44 conversions)</div></div>
+  <div class="kpi"><div class="v bad">−55%</div><div class="l">Stripe gross revenue Nov→Jun ($150.8k→$67.3k/mo)</div></div>
+  <div class="kpi"><div class="v">$959</div><div class="l">median Stripe customer total value (12 mo)</div></div>
+  <div class="kpi"><div class="v good">16/mo</div><div class="l">sales-led Won deals May &amp; June (was ~7)</div></div>
+  <div class="kpi"><div class="v bad">2–5/mo</div><div class="l">plan upgrades — expansion is a vacuum</div></div>
+</div>
+<p>The one-sentence story: <b>the funnel is healing (June conversion doubled) but the self-serve revenue mix is shrinking</b> — new cohorts buy small plans while high-value legacy payers roll off — and the biggest leak (signup→card) still emits no data at all. Details: <a href="metrics.html">Metrics &amp; Money</a>.</p>
+
+<h2>The system in one paragraph</h2>
+<p>The app is a monorepo (<code>Discovery-imai</code>) running <b>entirely on Google Cloud</b> — an Angular frontend, a NestJS main API, an Express proxy that meters every API call, plus social-listening, brand-safety and campaign-tracker services. Product analytics, however, <b>exits the visible codebase</b>: three fire-and-forget emitters POST events to an env-configured webhook whose receiver is unknown (<span class="qq">Q1</span>), which lands them in a separate "pixel" Postgres (~4.6M rows) and fans out to Mixpanel, Klaviyo and Close. A legacy AWS pixel collects page visits; a separate customer-facing pixel attributes e-commerce conversions. Full picture: <a href="architecture.html">Architecture</a>.</p>
+
+<h2>Read this before trusting any number</h2>
+<div class="alert"><b>The five rules</b> (violating any of these has produced wrong numbers before):
+<ul>
+  <li><b>Never compute dollars from webhook events</b> — they captured ~36% of recurring dollars (June 2026). Dollars = prod <code>user_payments</code> + Close; Stripe-integration Mixpanel dollars are usable for the Stripe engine only (<span class="qq">Q28</span>).</li>
+  <li><b>Never mix Mixpanel namespaces</b> in one KPI — "Login" vs <code>user_logged_in</code>, "Signup" vs <code>signup</code>, "Influencer Search" vs <code>influencer_discovery_search</code> (41% apart, <span class="qq">Q25</span>).</li>
+  <li><b>Exclude admin-created accounts</b> from funnels; roll team members up via <code>main_user_id</code>.</li>
+  <li><b>Respect event birth dates</b>: <code>cancel_trial</code> 2026-04-22, <code>trial_*</code> friction 2026-06-30 — trends crossing them are measurement changes. Same for the Jul-21 signup-flow change (onboarding events collapse) and trial search-window change.</li>
+  <li><b>payment_failed is dunning noise</b> — count distinct users, never raw events.</li>
+</ul></div>
+
+<h2>Site map</h2>
+<div class="cols">
+  <a class="card link" href="architecture.html"><h3>Architecture →</h3>Full system diagram: services, GCP/AWS/Bubble topology, the external event pipeline, data stores, the three things called "pixel".</a>
+  <a class="card link" href="events.html"><h3>Events &amp; Analytics Mapping →</h3>How behavior becomes data: the 3 emitters, ~55 events + families, 4 Mixpanel namespaces, renames &amp; duplicates, every side channel, client↔server cross-map.</a>
+  <a class="card link" href="features.html"><h3>Features →</h3>Every product module: what it does, where it lives in code, which events it emits, quota/billing hooks.</a>
+  <a class="card link" href="user-flows.html"><h3>User Flows →</h3>Step-by-step journeys with drop-off numbers: signup→trial→paid, trial friction, cancellation, sales-led, and the customer pixel journey.</a>
+  <a class="card link" href="metrics.html"><h3>Metrics &amp; Money →</h3>Monthly cohorted funnel, Stripe revenue &amp; customer value, abuse-gate geography, sales pipeline volumes, benchmarks.</a>
+  <a class="card link" href="open-questions.html"><h3>Open Questions →</h3>The Q1–Q29 register: what's unknown, why it matters, and exactly how to answer each one.</a>
+</div>
+
+<h2>Current health warnings</h2>
+<ul>
+  <li class="danger">The audit's remediation patches (R1/R2/R8/R16/R21) were never merged — the proxy emitter is ungated, GA4/Slack/Bubble secrets are hardcoded in source, and there's no event CI guardrail. (Verified at HEAD 2026-07-22; register item <span class="qq">Q29</span> asks whether prod ever ran them out-of-band.)</li>
+  <li class="danger">The single highest-leverage unknown is still <span class="qq">Q1</span>: one grep on the prod VM reveals the entire external analytics pipeline (and now also the pixel-DB host, <span class="qq">Q3</span>).</li>
+  <li>Two services run on the prod VM outside version control (<span class="qq">Q8</span>); event delivery is fire-and-forget with no retry anywhere — downstream gaps are by design.</li>
+</ul>
+
+<footer>Sources: docs-events-audit/ (code audit @ da98fcf2 + Mixpanel measurement 2026-07-21/22) · machine-readable map: architecture/imai-architecture.json · this site: site/ in caras-new-voices/imai-data-work.</footer>
+</div>
+</body>
+</html>

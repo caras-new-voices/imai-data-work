@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IMAI — Metrics &amp; Money</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><div class="inner">
+  <a class="brand" href="index.html">IMAI · How It Works</a>
+  <nav>
+    <a href="index.html">Overview</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="events.html">Events &amp; Analytics</a>
+    <a href="features.html">Features</a>
+    <a href="user-flows.html">User Flows</a>
+    <a class="on" href="metrics.html">Metrics &amp; Money</a>
+    <a href="open-questions.html">Open Questions</a>
+  </nav>
+</div></header>
+<div class="wrap">
+
+<h1>Metrics &amp; money</h1>
+<p class="sub">Measured live from Mixpanel (project 3432835) on 2026-07-21/22. Cohort windows complete; July partial through the 20th. Dollars = <b>Stripe engine only</b>, unverified vs the Stripe dashboard (<span class="qq">Q28</span>).</p>
+
+<h2>1. Self-serve funnel — monthly cohorts</h2>
+<p><code>signup</code> → <code>Free Trial Signup</code> → <code>new_subscription_payment</code>, unique users, 14-day conversion window per trial cohort.</p>
+<div class="scroll"><table>
+  <tr><th>Cohort</th><th>Signups</th><th>Trials</th><th>Signup→trial</th><th>Blocked at gate</th><th>Trial→paid (14d)</th><th>Paid</th><th>Avg convert</th><th>Active cancels</th></tr>
+  <tr><td>Feb 2026</td><td>155</td><td>20</td><td>12.9%</td><td>28</td><td><b>35%</b></td><td>7</td><td>6.9 d</td><td>n/a (pre-event)</td></tr>
+  <tr><td>Mar 2026</td><td>374</td><td>51</td><td>13.6%</td><td>36</td><td><b>24%</b></td><td>12</td><td>6.1 d</td><td>n/a (born Apr 22)</td></tr>
+  <tr><td>Apr 2026</td><td>1,033</td><td>185</td><td>17.9%</td><td>116</td><td><b>11%</b></td><td>20</td><td>9.3 d</td><td>30 (partial)</td></tr>
+  <tr><td>May 2026</td><td>1,837</td><td>217</td><td>11.8%</td><td>100</td><td><b>10%</b></td><td>21</td><td>10.9 d</td><td>131 (60%)</td></tr>
+  <tr><td>Jun 2026</td><td>1,527</td><td>221</td><td>14.5%</td><td>69</td><td><b>20%</b></td><td>44</td><td>6.6 d</td><td>90 (41%)</td></tr>
+  <tr><td>Jul → 20</td><td>1,387</td><td>84</td><td>(partial)</td><td>29</td><td>(censored)</td><td>—</td><td>—</td><td>21</td></tr>
+</table></div>
+<ul>
+  <li><b>The Apr–May dip is a cohort-quality story:</b> as signups ×5'd, conversion fell to ~10% and time-to-convert stretched past the day-7 autocharge (10.9d) while gate blocks and Stripe failures peaked. <b>June reversed all three at once</b> — find and codify what changed.</li>
+  <li>Signup→trial is trendless (11.8–17.9%): the ~86% top-of-funnel cliff is structural and uninstrumented.</li>
+  <li>Blended multi-month rates (e.g. "13.6%") hide the swing — always use monthly cohorts.</li>
+</ul>
+
+<h2>2. Abuse gate — geography (Apr 1 – Jul 20, unique users)</h2>
+<div class="scroll"><table>
+  <tr><th>Country</th><th>Blocked</th><th>Trials passed</th><th>Blocked share of card-enterers</th></tr>
+  <tr><td>United States</td><td>32</td><td>111</td><td>22%</td></tr>
+  <tr><td>United Kingdom</td><td>37</td><td>81</td><td>31%</td></tr>
+  <tr><td>Brazil</td><td>21</td><td>39</td><td>35%</td></tr>
+  <tr><td>Turkey</td><td>14</td><td>27</td><td>34%</td></tr>
+  <tr><td>Philippines</td><td>19</td><td>20</td><td>49%</td></tr>
+  <tr><td><b>ALL countries</b></td><td><b>314</b></td><td><b>705</b></td><td><b>31%</b></td></tr>
+</table></div>
+<p>Cross-check: Stripe failed charges ran 296 (Apr) → <b>634 (May)</b> → 260 (Jun) against a stable 104–126 succeeded — a real card-testing/abuse wave met the gate. The open question is <b>precision</b> (false positives), answerable only from logs-DB block payloads (<span class="qq">Q27</span>/<span class="qq">Q3</span>). Even a 15–20% false-positive rate = +8–10% trials/month.</p>
+
+<h2>3. Stripe self-serve dollars (engine-only view)</h2>
+<div class="alert"><b>Scope:</b> Stripe→Mixpanel integration, <code>Status='succeeded'</code>, Amount Charged in whole USD. Excludes Cardcom (IL) and ALL manual/enterprise Close deals — the majority of paying accounts. Unverified vs the Stripe dashboard (<span class="qq">Q28</span>): treat the trend as directional until cross-checked.</div>
+<div class="scroll"><table>
+  <tr><th>Month</th><th>Gross revenue</th><th>Unique payers</th><th>Revenue / payer</th><th>Refunds</th></tr>
+  <tr><td>Nov 2025</td><td>$150,836</td><td>171</td><td>$882</td><td>$12,267</td></tr>
+  <tr><td>Dec 2025</td><td>$139,038</td><td>159</td><td>$874</td><td>$7,240</td></tr>
+  <tr><td>Jan 2026</td><td>$100,438</td><td>127</td><td>$791</td><td>$6,209</td></tr>
+  <tr><td>Feb 2026</td><td>$78,271</td><td>86</td><td>$910</td><td>$3,396</td></tr>
+  <tr><td>Mar 2026</td><td>$74,628</td><td>88</td><td>$848</td><td>$1,419</td></tr>
+  <tr><td>Apr 2026</td><td>$86,764</td><td>99</td><td>$876</td><td>$9,142</td></tr>
+  <tr><td>May 2026</td><td>$80,210</td><td>108</td><td>$743</td><td>$2,126</td></tr>
+  <tr><td>Jun 2026</td><td>$67,258</td><td>119</td><td><b>$565</b></td><td>$3,021</td></tr>
+  <tr><td>Jul → 20</td><td>$50,672</td><td>64</td><td>$792</td><td>$1,896</td></tr>
+</table></div>
+<ul>
+  <li><b>−55% Nov→Jun while the funnel improved.</b> Payers bottomed in Feb (86) and recovered every month (119 by June) — but revenue/payer fell to $565: new cohorts buy $99/$499 while higher-value legacy payers roll off. July's pace (~$76k full-month) suggests stabilization.</li>
+  <li><b>Customer value (trailing 12 mo, Stripe payers):</b> average $2,549 total charged · median $959 · p90 $5,489 · 3.35 succeeded charges per payer. Use the median for "a typical customer".</li>
+  <li><b>Price points in the wild</b> (Apr–Jul succeeded mix): $499×97 · $599×69 · $99×46 · $175×42 · $959×27 · $1199/1200×20 + custom tail to $7,500. $599/$959/$175 are undocumented — plans are DB rows; mapping needs prod package tables or Stripe (<span class="qq">Q28</span>).</li>
+  <li><b>Refunds:</b> ~2–8% of gross; April spiked to $9.1k during the abuse wave.</li>
+  <li class="danger">44 record conversions at ~$300–500 first charges cannot 1:1 replace $874-ARPU legacy payers — the strategic conversation is mix/win-back/expansion, not just conversion counts.</li>
+</ul>
+
+<h2>4. Sales-led pipeline (Close mirrors — approximate)</h2>
+<div class="scroll"><table>
+  <tr><th>Stage (uniques/mo)</th><th>Dec</th><th>Jan</th><th>Feb</th><th>Mar</th><th>Apr</th><th>May</th><th>Jun</th><th>Jul→20</th></tr>
+  <tr><td>Identification</td><td>—</td><td>—</td><td>—</td><td>—</td><td>38</td><td>16</td><td>8</td><td>4</td></tr>
+  <tr><td>Qualification</td><td>—</td><td>—</td><td>—</td><td>—</td><td>46</td><td>23</td><td>15</td><td>11</td></tr>
+  <tr><td>Discovery / Demo</td><td>—</td><td>—</td><td>—</td><td>—</td><td>9</td><td>3</td><td>3</td><td>1</td></tr>
+  <tr><td>Proposal / Buying</td><td>—</td><td>—</td><td>—</td><td>—</td><td>5</td><td>6</td><td>1</td><td>2</td></tr>
+  <tr><td><b>Won</b></td><td>3</td><td>9</td><td>2</td><td>8</td><td>7</td><td><b>16</b></td><td><b>16</b></td><td>6</td></tr>
+  <tr><td>Won (Renewed/Expanded)</td><td>—</td><td>—</td><td>—</td><td>—</td><td>3</td><td>20</td><td>14</td><td>6</td></tr>
+  <tr><td>Lost</td><td>13</td><td>8</td><td>9</td><td>6</td><td>12</td><td>9</td><td>10</td><td>4</td></tr>
+  <tr><td>No Show</td><td>2</td><td>1</td><td>4</td><td>1</td><td>8</td><td>10</td><td>4</td><td>1</td></tr>
+  <tr><td>Scheduled Meeting</td><td>36</td><td>30</td><td>35</td><td>25</td><td>39</td><td>26</td><td>29</td><td>13</td></tr>
+</table></div>
+<ul>
+  <li>Won doubled May–June (16/mo vs 2–9 before); Won:Lost improved ~1:1 → ~1.6:1; renewal wins visible since April.</li>
+  <li class="danger">Meetings flat at ~30/month through a 5× demand surge — sales top-of-funnel didn't scale. Meanwhile the trial book-a-call CTA fires ~3×/month against 40% unlock-modal reach: an obvious routing gap.</li>
+  <li>answered_scheduled_ai_agent_call spiked to 23 in June (vs 0–3) — watch whether it correlates with the June recovery.</li>
+  <li>Early stages are 3 months old and single-digit at the narrow end — no velocity/stage-conversion claims yet; deal DOLLARS live only in Close (<span class="qq">Q6</span>).</li>
+</ul>
+
+<h2>5. Verified baselines (from the internal catalog, dated)</h2>
+<ul>
+  <li>Trial 7 days; trial→paid median 6.9d, ~76% converting day 6–8 (autocharge); trial cancel median ~4h (mean ~39h).</li>
+  <li>Event log ≈70% of charges / 36% of recurring dollars (June 2026) — the reason dollars never come from webhook events.</li>
+  <li>"isActive" lies: ~2,170 raw vs ~650 real active (endTime+endTrial filter). Paying churn needs a prior-payment EXISTS filter (raw ~4× too high).</li>
+  <li>561 manual payers; ~280 with zero events ever; health score at usage-board.service.ts:1909.</li>
+  <li>Measurement-change dates to respect: cancel_trial 2026-04-22 · trial_* friction 2026-06-30 · signup-skips-onboarding + search-session window 2026-07-21.</li>
+</ul>
+
+<h2>6. What's still blocked</h2>
+<div class="scroll"><table>
+  <tr><th>Missing</th><th>Blocker</th><th>Unblocks</th></tr>
+  <tr><td>Complete dollars (Cardcom + manual; MRR, NRR, LTV)</td><td>prod user_payments + IMAI Close org (<span class="qq">Q6</span>); Stripe completeness (<span class="qq">Q28</span>)</td><td>The full revenue picture</td></tr>
+  <tr><td>Abuse-gate false-positive rate</td><td>payloads stripped (<span class="qq">Q27</span>); logs DB (<span class="qq">Q3</span>)</td><td>Gate precision + recovery path</td></tr>
+  <tr><td>Signup→card diagnosis</td><td>segment uninstrumented</td><td>The single biggest funnel lever</td></tr>
+  <tr><td>Sales velocity</td><td>mirrors lack status_id; 3 months of history</td><td>True sales-funnel rates</td></tr>
+</table></div>
+
+<footer>Full reports: <code>docs-events-audit/13-sales-funnel-report-2026-07.md</code> + <code>deliverables/Sales-Funnel-Report-2026-07.docx</code> + <code>State-of-Spending-Interim.docx</code> · method: <code>docs-events-audit/prompts/sales-funnel-report-prompt.md</code></footer>
+</div>
+</body>
+</html>

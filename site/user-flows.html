@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IMAI — User Flows</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><div class="inner">
+  <a class="brand" href="index.html">IMAI · How It Works</a>
+  <nav>
+    <a href="index.html">Overview</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="events.html">Events &amp; Analytics</a>
+    <a href="features.html">Features</a>
+    <a class="on" href="user-flows.html">User Flows</a>
+    <a href="metrics.html">Metrics &amp; Money</a>
+    <a href="open-questions.html">Open Questions</a>
+  </nav>
+</div></header>
+<div class="wrap">
+
+<h1>User flows</h1>
+<p class="sub">Step-by-step journeys with the events each step emits (<span class="ok" style="font-family:var(--mono);font-size:12px">green mono</span>) and measured drop-off. Conversion numbers: monthly cohorts, June 2026 unless noted.</p>
+
+<h2>1. Self-serve: signup → trial → paid (the growth funnel)</h2>
+<div class="steps">
+  <div class="step"><b>Lands on imai.co / white-label domain <span class="pct">1,527 signups/mo (Jun)</span></b><small>GTM/GA4/Clarity tags fire; AWS visit pixel beacons UTM/gclid on key pages</small></div>
+  <div class="down">▼</div>
+  <div class="step"><b>Registers (email or Google)</b><small>Since 2026-07-21: Gmail-via-Google allowed again; ALL IMAI signups skip onboarding → straight to /trial</small><span class="ev">signup · GTM successful_signup · GA4 signup/google_signup · Clarity "New Signup" · Bubble ip-capture</span></div>
+  <div class="down">▼ <span class="danger">~86–88% NEVER REACH THE CARD PAGE — zero events in this gap (top remediation item)</span></div>
+  <div class="step branch"><b>Enters card on the trial page <span class="pct">~12–15% of signups</span></b><span class="ev">GA4 begin_checkout · Added Payment Method (Stripe)</span></div>
+  <div class="down">▼ abuse gate decides ▼</div>
+  <div class="step bad"><b>BLOCKED by abuse gate <span class="pct">~31% of card-enterers</span></b><small>US 22% · UK 31% · BR 35% · PH 49% blocked (Apr–Jul). Reasons only in logs DB (Q27). Slack alert fires</small><span class="ev">free_trial_blocked</span></div>
+  <div class="step end"><b>Trial starts (7 days) <span class="pct">221 trials (Jun)</span></b><small>Card saved; day-7 autocharge scheduled</small><span class="ev">"Free Trial Signup" · GTM successful_trial_started · GA4 trial_success · AWS pixel ?u=1</span></div>
+  <div class="down">▼ the first hours decide everything ▼</div>
+  <div class="step branch"><b>Activation: first report in session one</b><small>Median active cancel is ~4h in — value must land immediately. 40% hit the unlock modal during trial (July)</small><span class="ev">first_report_created (ACTIVATION) · trial_* friction family</span></div>
+  <div class="down">▼</div>
+  <div class="step bad"><b>Active cancel <span class="pct">41% of trials (Jun; was 60% May)</span></b><small>Median ~4h, mean ~39h. Retention: AI-agent call flow exists</small><span class="ev">cancel_trial · rich payload → make.com · Slack</span></div>
+  <div class="step end"><b>Day 6–8 AUTOCHARGE → paid <span class="pct">20% of trials (Jun) · avg 6.6d</span></b><small>~76% of conversions are the passive autocharge, not an active purchase. 44 conversions in June (record)</small><span class="ev">new_subscription_payment · GA4 payment_success (client) · GA4 MP purchase (server, {99,499,1200} only)</span></div>
+  <div class="down">▼</div>
+  <div class="step"><b>Recurring renewals</b><small>Stripe/Cardcom cron. Failures = dunning (218 payment_failed events/30d; recovery untracked)</small><span class="ev">payment_success (partial coverage) · payment_failed · "Payment Attempt" (Stripe, all charges)</span></div>
+  <div class="down">▼ rare ▼</div>
+  <div class="step branch"><b>Upgrade <span class="pct">2–5/mo — the expansion vacuum</span></b><small>All limit/upgrade prompts are TRIAL-only; paying users hitting ceilings see nothing</small><span class="ev">upgrade_package_payment · GA4 upgrade_package</span></div>
+  <div class="step bad"><b>Churn</b><small>~72% of raw "Cancelled Subscription" emitters are actually trial users (legacy path) — real paying churn needs a prior-payment filter</small><span class="ev">started_cancellation_process → Cancelled Subscription / cancel_subscription_after_ai_agent_call · deactivate_account</span></div>
+</div>
+
+<h2>2. Trial friction journey (inside the 7 days, events born 2026-06-30)</h2>
+<div class="steps">
+  <div class="step"><b>Hits a daily/total quota or gated feature</b><small>Server-enforced; deduped once per user+event per day. Since Jul-21 searches within a ~50s window of the last counted one don't consume quota</small><span class="ev">trial_report_daily_limit_reached_day{1..7} · trial_report_total_limit_reached · trial_feature_blocked</span></div>
+  <div class="down">▼</div>
+  <div class="step branch"><b>Sees upgrade UX <span class="pct">40% of July trials</span></b><small>Unlock modal (highest-volume intent signal) + banners/CTAs at 15 placements</small><span class="ev">trial_unlock_modal_opened · trial_upgrade_&lt;placement&gt;</span></div>
+  <div class="down">▼ three exits ▼</div>
+  <div class="step end"><b>Upgrades / converts</b><small>Modal-openers converted 15% vs 13% baseline in July (n tiny — no proven lift yet)</small></div>
+  <div class="step branch"><b>Books a human call <span class="pct">~3/month — CTA effectively invisible</span></b><small>Opens Calendly. Big untapped routing opportunity given 40% modal reach</small><span class="ev">trial_book_call_sidebar / _top_bar</span></div>
+  <div class="step bad"><b>Cancels</b><span class="ev">cancel_trial</span></div>
+</div>
+
+<h2>3. Sales-led journey (the majority of revenue)</h2>
+<div class="steps">
+  <div class="step"><b>Lead enters (demo request, outreach)</b><small>Meetings run flat ~25–39/month regardless of the 5× signup surge — sales top-of-funnel didn't scale</small><span class="ev">"Scheduled Meeting" · scheduled_demo_&lt;rep&gt; · high_value_signup (orphan)</span></div>
+  <div class="down">▼</div>
+  <div class="step"><b>Close CRM pipeline</b><small>Stage mirrors began Apr 2026; Sales vs CS pipelines ambiguous without status_id (Q6). AI-agent calls spiked to 23 answered in June</small><span class="ev">Identification → Qualification → Discovery/Demo → Proposal/Buying (single digits/mo at the narrow end)</span></div>
+  <div class="down">▼</div>
+  <div class="step end"><b>Won <span class="pct">16/mo May &amp; June (was ~7)</span></b><small>Deal value lives ONLY in Close. Account often created by admin → skips the self-serve funnel entirely</small><span class="ev">"Won" · user_created_by_admin</span></div>
+  <div class="down">▼</div>
+  <div class="step branch"><b>Manual renewal cycle</b><small>Relationship + admin-set endTime. ~280 of 561 manual payers have ZERO platform events — usage health (score @ usage-board.service.ts:1909) is the only leading signal</small><span class="ev">"Won (Renewed/Expanded)" (tracked since Apr) · "Lost"</span></div>
+</div>
+
+<h2>4. Customer conversion-pixel journey (IMAI's customers' shoppers)</h2>
+<div class="split">
+<div class="steps">
+  <div class="step"><b>Brand sets up</b><small>Toggles pixel on campaign (needs domain + conversion value); installs pixel.js / Shopify extension / Woo plugin; domain must be in client_domains allowlist</small><span class="ev">POST /tracking/ping on every SDK load ("is it installed")</span></div>
+  <div class="down">▼</div>
+  <div class="step"><b>Shopper clicks influencer link</b><small>?imai_click_id (from redirector) or ?imai_sc shortcode → first-party cookie _imai_clickid (30d, tunable 1–365d)</small><span class="ev">POST /tracking/sdk-click (incl. client-side ipify IP — removal candidate)</span></div>
+  <div class="down">▼</div>
+  <div class="step end"><b>Shopper buys</b><small>Auto-tracked (Shopify/Woo/Magento) or manual imaiTrackConversion()</small><span class="ev">POST /tracking/conversion (orderId, amount, coupon, lineItems)</span></div>
+  <div class="down">▼</div>
+  <div class="step"><b>Attribution</b><small>clickId → coupon code → IP fallback (24h) → CampaignInfluencerConversions tables → campaign ROI UI</small></div>
+</div>
+<div class="steps">
+  <div class="step branch"><b>Traps in this flow</b><small>• Legacy Bubble wf/order-conversion-* path still in the tutorial — two live ingestion generations (Q21)<br>• ?imai_env=local|stage backdoor persists in localStorage — can silently blackhole real conversions<br>• Three different things are called "pixel" — this one is the CUSTOMER SDK, not the AWS visit pixel, not the pixel DB</small></div>
+</div>
+</div>
+
+<h2>5. White-label tenant flow</h2>
+<div class="steps">
+  <div class="step"><b>Tenant user signs up on a white-label domain (~50 domains)</b><small>Same app, tenant brand. IMAI's client tags all load (Q12)</small></div>
+  <div class="down">▼</div>
+  <div class="step branch"><b>Server events route per label</b><small>CLOSE_WEBHOOK_URL_&lt;LABEL&gt; if configured, else the default URL — and tenant identity is STRIPPED from the payload either way → indistinguishable downstream (Q13)</small></div>
+  <div class="down">▼</div>
+  <div class="step"><b>Reseller economics</b><small>Linkage only via reseller_stripe_cuid; reseller_customer_created event; DoReel seed shows a $599 Growth default</small></div>
+</div>
+
+<footer>Numbers: <a href="metrics.html">Metrics &amp; Money</a> · event details: <a href="events.html">Events &amp; Analytics</a> · flow-change history (Jul-21 signup/search changes): <code>docs-events-audit/REFRESH-NOTES-2026-07-22.md</code></footer>
+</div>
+</body>
+</html>

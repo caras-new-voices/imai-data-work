@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IMAI — Features</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><div class="inner">
+  <a class="brand" href="index.html">IMAI · How It Works</a>
+  <nav>
+    <a href="index.html">Overview</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="events.html">Events &amp; Analytics</a>
+    <a class="on" href="features.html">Features</a>
+    <a href="user-flows.html">User Flows</a>
+    <a href="metrics.html">Metrics &amp; Money</a>
+    <a href="open-questions.html">Open Questions</a>
+  </nav>
+</div></header>
+<div class="wrap">
+
+<h1>Feature map</h1>
+<p class="sub">Every product module: what it does, where it lives, what it emits, how it's metered. Code refs @ <code>da98fcf2</code>.</p>
+
+<h2>Core product</h2>
+<div class="cols">
+  <div class="card"><h3>Influencer Discovery Search</h3>
+    Cross-platform influencer search (Instagram/TikTok/YouTube + LinkedIn, Snapchat variants). The highest-volume feature by far.
+    <ul><li>Code: proxy (fronting the search API) + <code>Influencer.controller.ts</code></li>
+    <li>Events: <code>influencer_discovery_search</code> (~2.8M rows), <code>_paginated</code>; import twin "Influencer Search" (41% lower, <span class="qq">Q25</span>)</li>
+    <li>Metering: proxy billing tables, package type 1; trial quota with the Jul-21 <b>search-session window</b> (searches within ~50s of the last counted one are free — code default 50s, comment claims 300s)</li>
+    <li>Health-score input</li></ul></div>
+  <div class="card"><h3>Influencer Reports</h3>
+    Deep per-influencer analysis (audience, performance). The activation feature.
+    <ul><li>Code: <code>reports/report.controller.ts</code></li>
+    <li>Events: <code>report_creation_attempt/created_report/report_creation_failed</code>, <code>first_report_created</code> = <b>the activation milestone</b>; import twin "Influencer Report" (props: Report ID, Influencer ID, Platform)</li>
+    <li>Metering: package type 2; trial daily/total report limits → friction events</li></ul></div>
+  <div class="card"><h3>Campaigns</h3>
+    Campaign workspace: add influencers, requirements/approvals, invites, chat, post tracking.
+    <ul><li>Code: <code>campaigns.controller.ts</code> + campaigns-api (bulk) + Cloud Run campaign-tracker (post-metrics scraping) + Phyllo creator-auth status (via pixel-DB <code>phyllo_webhooks</code>, new Jul-21)</li>
+    <li>Events: <code>created_campaign</code>+<code>campaign_created</code> (both fire, <span class="qq">Q9</span>), <code>first_campaign_created</code>, <code>influencer_added_to_campaign</code>; import family "Created Campaign", "Campaign Media Scraped" (~6.6k/30d), "Campaign Invite", "Campaign Chat Message", "Campaign Requirement Approval", "Added Tracked Campaign Influencer"</li></ul></div>
+  <div class="card"><h3>Lists</h3>
+    Save/organize influencers into lists.
+    <ul><li>Code: <code>lists/list.controller.ts</code></li>
+    <li>Events: <code>first_list_created</code> only (the every-time <code>created_list</code> was planned as R16 but never merged, <span class="qq">Q29</span>); import twins "Created Influencer List", "Added Influencer to List"</li></ul></div>
+  <div class="card"><h3>Geo Analysis</h3>
+    Geographic audience analysis.
+    <ul><li>Code: <code>geo/geo.controller.ts</code></li><li>Events: <code>created_geo_analysis</code>, <code>regenerated_geo_analysis</code></li></ul></div>
+  <div class="card"><h3>PR / Journalist Outreach</h3>
+    Journalist search, media lists, AI pitch generation and sending.
+    <ul><li>Code: <code>entity/controllers/*</code></li>
+    <li>Events: <code>pr_journalist_search</code>, <code>pr_created_media_list</code>, <code>pr_generated_pitch</code>, <code>pr_sent_pitch</code> (last one never reaches Mixpanel, <span class="qq">Q26</span>)</li></ul></div>
+  <div class="card"><h3>Social Listening</h3>
+    Segment-based listening: mentions, trends, insights. Own backend service.
+    <ul><li>Code: <code>backend/social-listening</code> + <code>social-listening.controller.ts</code> (main)</li>
+    <li>Events: <code>social_listening_segment_created</code>, <code>social_listening_report_ready</code>, <code>created_social_listening_report</code>, <code>generated_social_trends_insight</code> — entire family missing from Mixpanel (<span class="qq">Q26</span>)</li>
+    <li>Metering: package type 4</li></ul></div>
+  <div class="card"><h3>Brand Safety</h3>
+    AI analysis of influencer content risk. Own service.
+    <ul><li>Code: <code>backend/brand-safety</code>; callback to main on completion</li>
+    <li>No behavioral events; AI cost → <code>ai_usage</code> table</li></ul></div>
+</div>
+
+<h2>Monetization &amp; account features</h2>
+<div class="cols">
+  <div class="card"><h3>Trials &amp; subscriptions</h3>
+    7-day card-first trial with anti-abuse gate; day-7 autocharge; Stripe + Cardcom (IL, ×1.17 VAT); plan upgrades.
+    <ul><li>Code: <code>payments/payments.service.ts</code> (gate :1545, trial :1634, conversion :500/:1710/:2210, upgrades :1349/:1410, idempotency guard :2084)</li>
+    <li>Cancel flows in <code>users.service.ts</code> (ternary :2195) + AI-agent retention call variant</li></ul></div>
+  <div class="card"><h3>Trial gating &amp; friction UX</h3>
+    Daily/total quotas per feature, gated features, upgrade CTAs at 15 placements, unlock modal, book-a-call, sample reports.
+    <ul><li>Code: <code>trial-gating.service.ts</code> (client) + quota enforcement (server)</li>
+    <li>Events: the <code>trial_*</code> families (born 2026-06-30)</li></ul></div>
+  <div class="card"><h3>Teams</h3>
+    Multi-seat accounts; members get their own user_id under a <code>main_user_id</code>.
+    <ul><li>Events: <code>team_member_added</code>; import twin "Invited Team Member"</li>
+    <li>Analysis rule: always roll up to main_user_id</li></ul></div>
+  <div class="card"><h3>API access &amp; credits</h3>
+    Programmatic API metered by the proxy (x-tokens-cost per route, package types, balance decrement per key).
+    <ul><li>Events: <code>api_credits_added</code>, <code>api_credits_renewed</code> (emitter unconfirmed)</li></ul></div>
+  <div class="card"><h3>White-label / resellers</h3>
+    ~50 tenant domains run the platform under their own brand.
+    <ul><li>Server events route to per-label webhook URLs but tenant identity is STRIPPED from payloads → reseller traffic is invisible downstream (<span class="qq">Q13</span>)</li>
+    <li>All tenant domains load IMAI's client tags (<span class="qq">Q12</span>); VWO is imai-only; reseller linkage only via <code>reseller_stripe_cuid</code></li></ul></div>
+  <div class="card"><h3>Onboarding</h3>
+    KYC-style onboarding with team invite step — <b>bypassed for all IMAI signups since 2026-07-21</b> (straight to /trial). Forced-onboarding booking flows exist per CS rep.
+    <ul><li>Events: <code>finished_onboarding</code> (collapsing post-change), <code>scheduled_forced_onboarding_*</code></li></ul></div>
+</div>
+
+<h2>Customer-facing tracking product</h2>
+<div class="cols">
+  <div class="card"><h3>Conversion Pixel (customer SDK)</h3>
+    IMAI's customers install this on THEIR stores to attribute influencer-driven sales to campaigns. Not product analytics.
+    <ul><li>Components: <code>sdk/pixel.js</code> (served from cdn.influencermarketing.ai), Shopify web-pixel extension, WooCommerce plugin; Magento/BigCommerce auto-detect</li>
+    <li>Flow: <code>?imai_click_id</code>/<code>?imai_sc</code> → cookie <code>_imai_clickid</code> (30d) → POST /tracking/ping·sdk-click·conversion → attribution clickId→coupon→IP(24h) → campaign conversion tables</li>
+    <li>Per-campaign toggle (<code>pixelActive</code>); domain allowlist (<code>client_domains</code>)</li>
+    <li>Legacy parallel path: Bubble <code>wf/order-conversion-*</code> still in the tutorial (<span class="qq">Q21</span>); client-side IP via ipify (removal blocked on <span class="qq">Q23</span>)</li></ul></div>
+  <div class="card"><h3>Internal analytics catalog (usage-ai)</h3>
+    In-repo analytics knowledge: <code>SCHEMA.md</code> (verified metric recipes) + usage-board with the customer <b>health score</b> (<code>usage-board.service.ts:1909</code>) replicating the Mixpanel formula. CS uses it for at-risk-renewal triage.</div>
+</div>
+
+<footer>Deeper: <code>architecture/imai-architecture.json</code> (services + key_files) · <code>docs-events-audit/06-conversion-pixel.md</code> · module READMEs now live in the app repo per the Jul-20 docs purge.</footer>
+</div>
+</body>
+</html>

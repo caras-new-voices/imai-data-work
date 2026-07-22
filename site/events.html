@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IMAI — Events &amp; Analytics Mapping</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><div class="inner">
+  <a class="brand" href="index.html">IMAI · How It Works</a>
+  <nav>
+    <a href="index.html">Overview</a>
+    <a href="architecture.html">Architecture</a>
+    <a class="on" href="events.html">Events &amp; Analytics</a>
+    <a href="features.html">Features</a>
+    <a href="user-flows.html">User Flows</a>
+    <a href="metrics.html">Metrics &amp; Money</a>
+    <a href="open-questions.html">Open Questions</a>
+  </nav>
+</div></header>
+<div class="wrap">
+
+<h1>Events &amp; analytics mapping</h1>
+<p class="sub">How user behavior becomes data — every emitter, event, destination, and trap. Sources: event dictionary + emitter audit @ <code>da98fcf2</code>, Mixpanel measured 2026-07-21.</p>
+
+<h2>1. The pipeline</h2>
+<div class="flow">
+  <div class="lane"><h3>Emitters (in repo)</h3><div class="boxes">
+    <div class="node gcp"><b>backend/main</b><small><code>users.service.ts:3733 sendPipeDriveWebhook</code> — ~50 events, gated <code>NODE_ENV==='prod'</code>, enriches name/email/main_user_id, per-white-label URLs (identity stripped)</small></div>
+    <div class="node bad" style="border-color:var(--danger)"><b>proxy</b><small><code>index.js:112</code> — the 2 highest-volume search events. <b>NO environment gate</b> (<span class="qq">Q10</span>; R1 patch unmerged)</small></div>
+    <div class="node gcp"><b>social-listening</b><small><code>social-listening-users.service.ts:36</code> — SL events, gated, no white-label routing</small></div>
+    <div class="node"><b>frontend bridge</b><small>POST /data/pipedrive/trial-event → whitelisted <code>trial_*</code> names (the only client-named server events)</small></div>
+  </div></div>
+  <div class="arrow">▼ fire-and-forget POST → <code>CLOSE_WEBHOOK_URL</code> ("PipeDrive" is a legacy misnomer — it's the Close webhook) ▼</div>
+  <div class="lane"><h3>External pipeline (<span class="qq">Q1</span>) → <code>imai_events</code> (~4.6M rows) → fan-out</h3><div class="boxes">
+    <div class="node ext"><b>Mixpanel</b><small>lossy + lagging; strips ALL payload props (<span class="qq">Q27</span>); renames 2 events</small></div>
+    <div class="node ext"><b>Klaviyo</b><small>7 lifecycle metrics + ~97 event-named lists; ~10% loss</small></div>
+    <div class="node ext"><b>Close CRM</b><small>leads/opportunities; stages mirror BACK into imai_events as events</small></div>
+  </div></div>
+</div>
+<div class="alert"><b>No retry, no queue, no dead-letter anywhere.</b> Event delivery is best-effort by design — every downstream gap (Mixpanel loss, Klaviyo ~10% misses, the April-2026 payment-event thin patch) is consistent with that.</div>
+
+<h2>2. Mixpanel: one project (3432835), four namespaces</h2>
+<div class="scroll"><table>
+  <tr><th>Namespace (Lexicon tag)</th><th>Shape</th><th>Source</th><th>Traps</th></tr>
+  <tr><td><code>webhook-pipeline</code></td><td>snake_case</td><td>the pipeline above</td><td>ALL payload props stripped (<span class="qq">Q27</span>). RENAMES: <code>new_subscription_trial</code>→"Free Trial Signup", <code>cancel_subscription</code>→"Cancelled Subscription" (snake names don't exist in Mixpanel)</td></tr>
+  <tr><td><code>server-import</code></td><td>Title-Case</td><td>$import batch job — source unidentified (<span class="qq">Q24</span>); confirmed NOT in the app repo</td><td>Highest volume ("Platform Usage" ~1.6M/30d). DUPLICATES: "Login"≈<code>user_logged_in</code>, "Signup"≈<code>signup</code>, "Influencer Search" vs <code>influencer_discovery_search</code> 41% apart (<span class="qq">Q25</span>)</td></tr>
+  <tr><td><code>stripe-integration</code></td><td>Title-Case</td><td>Stripe→Mixpanel integration</td><td>"Payment Attempt" = ALL charges incl. renewals + dunning (can exceed signups) — never a funnel step. Amount Charged = whole USD; failed charges log $0; completeness unverified (<span class="qq">Q28</span>)</td></tr>
+  <tr><td><code>crm-mirror</code></td><td>Stage names</td><td>Close pipeline mirror</td><td>No <code>status_id</code> → Sales vs CS pipelines ambiguous (<span class="qq">Q6</span>). Never count as product usage</td></tr>
+</table></div>
+<div class="good">All 102 events carry descriptions + namespace tags in the Mixpanel Lexicon (applied 2026-07-21), and the project business context encodes these rules — a fresh Mixpanel session starts pre-warned. Source of truth: <code>docs-events-audit/12-mixpanel-lexicon.md</code>.</div>
+
+<h2>3. Event dictionary — lifecycle &amp; billing (webhook, snake_case)</h2>
+<div class="scroll"><table>
+  <tr><th>Event</th><th>Fires when</th><th>Caveats that change analyses</th></tr>
+  <tr><td><code>signup</code></td><td>self-serve registration (users.service.ts:3046)</td><td>Admin-created accounts skip it — exclude <code>user_created_by_admin</code> from funnels. Payload: utm, phone</td></tr>
+  <tr><td><code>user_created_by_admin</code></td><td>admin creates account (sales-led)</td><td>marks accounts outside the self-serve funnel</td></tr>
+  <tr><td><code>user_logged_in</code></td><td>login (users.controller.ts:1020)</td><td>the ONLY session proxy — sessions/day = logins/day</td></tr>
+  <tr><td><code>finished_onboarding</code></td><td>onboarding KYC completes</td><td>skippable; and since 2026-07-21 ALL IMAI signups skip onboarding → this event collapses from that date</td></tr>
+  <tr><td><code>new_subscription_trial</code> → <b>"Free Trial Signup"</b></td><td>card accepted, trial starts (payments.service.ts:1634)</td><td>7-day trial; anchor = min(date) per user</td></tr>
+  <tr><td><code>free_trial_blocked</code></td><td>abuse gate blocks card-enterer (:1545 + Slack alert)</td><td>error payload stripped in Mixpanel (<span class="qq">Q27</span>) — reasons only in logs DB. Blocks ~31% of card-enterers</td></tr>
+  <tr><td><code>cancel_trial</code></td><td>active cancel while endTrial set (users.service.ts:2195 ternary)</td><td>BORN 2026-04-22; before that all cancels emitted cancel_subscription. Full trial churn = union of both</td></tr>
+  <tr><td><code>new_subscription_payment</code></td><td>first real charge — 3 paths: direct, trial conversion, renewal-cron (:500/:1710/:2210)</td><td>THE conversion event. Re-fires on re-subscription (~7% of payers) — dedupe by min(date). Never for dollars</td></tr>
+  <tr><td><code>payment_success</code></td><td>recurring renewal succeeds</td><td>PARTIAL coverage: ~57% of charges, 36% of dollars (June 2026). Trend shape only</td></tr>
+  <tr><td><code>payment_failed</code></td><td>charge attempt fails (initial + renewals)</td><td>dunning noise — 6,000 events per 44 successes; count DISTINCT users</td></tr>
+  <tr><td><code>upgrade_package_payment</code></td><td>plan upgrade charged</td><td>2–5/month — expansion vacuum</td></tr>
+  <tr><td><code>started_cancellation_process</code></td><td>user enters cancel flow</td><td>churn INTENT (many don't finish); pollutes trial_analytics_report.cancel_date</td></tr>
+  <tr><td><code>cancel_subscription</code> → <b>"Cancelled Subscription"</b></td><td>cancel when endTrial NOT set</td><td>NOT paying churn by itself — ~72% of last year's emitters were trial users (legacy path). Needs prior-payment EXISTS filter</td></tr>
+  <tr><td><code>duplicate_charge_prevented</code> · <code>manual_subscription_purchase_blocked</code> · <code>trial_charge_exception</code> · <code>new_trial_email_failed</code> · <code>deactivate_account</code> · <code>refund</code></td><td>operational/billing edge cases</td><td>operational, not behavioral</td></tr>
+</table></div>
+
+<h2>4. Event dictionary — product usage (webhook)</h2>
+<div class="scroll"><table>
+  <tr><th>Event</th><th>Fires when</th><th>Notes</th></tr>
+  <tr><td><code>influencer_discovery_search</code></td><td>user-initiated search (proxy :292 + backend Influencer.controller.ts ×3)</td><td>~2.8M rows — aggregate, never scan. Health-score input</td></tr>
+  <tr><td><code>influencer_discovery_search_paginated</code></td><td>pagination (proxy :300)</td><td>excluded from engagement definitions</td></tr>
+  <tr><td><code>report_creation_attempt</code> / <code>created_report</code> / <code>report_creation_failed</code></td><td>report requested / created / failed</td><td><code>created_report</code> is excluded from the health score; absent from Mixpanel (import "Influencer Report" is the counterpart)</td></tr>
+  <tr><td><code>first_report_created</code></td><td>first-ever report (quota.count===0)</td><td><b>ACTIVATION MILESTONE</b> — canonical "activated trial"</td></tr>
+  <tr><td><code>created_campaign</code> + <code>campaign_created</code></td><td>campaign created — <b>BOTH fire</b></td><td>duplicate pair (<span class="qq">Q9</span>) — dedupe; neither reaches Mixpanel</td></tr>
+  <tr><td><code>first_campaign_created</code> · <code>influencer_added_to_campaign</code> · <code>first_list_created</code> · <code>created_geo_analysis</code> · <code>regenerated_geo_analysis</code></td><td>feature usage</td><td>first_* = activation milestones. NOTE: <code>created_list</code> (planned R16) never shipped</td></tr>
+  <tr><td><code>pr_journalist_search</code> · <code>pr_created_media_list</code> · <code>pr_generated_pitch</code> · <code>pr_sent_pitch</code></td><td>PR module</td><td>pr_sent_pitch never reaches Mixpanel (<span class="qq">Q26</span>)</td></tr>
+  <tr><td><code>social_listening_segment_created</code> · <code>social_listening_report_ready</code> · <code>created_social_listening_report</code> · <code>generated_social_trends_insight</code></td><td>SL pipeline + usage</td><td>whole family missing from Mixpanel (<span class="qq">Q26</span>)</td></tr>
+</table></div>
+
+<h2>5. Trial-friction families (born 2026-06-30)</h2>
+<ul>
+  <li><code>trial_{feature}_daily_limit_reached[_day{N}]</code> / <code>trial_{feature}_total_limit_reached</code> / <code>trial_feature_blocked</code> — server-side from quota enforcement, deduped once per user+event per day.</li>
+  <li><code>trial_upgrade_&lt;placement&gt;</code> (15 placements: top_bar, sidebar_workspace, search_banner, locked_403, …) / <code>trial_unlock_modal_opened</code> / <code>trial_book_call_*</code> / <code>trial_sample_report_viewed</code> — frontend via the whitelisted bridge. Aggregate with <code>LIKE 'trial_upgrade_%'</code>.</li>
+  <li class="danger">Any trend crossing 2026-06-30 is a measurement change. First read (July): 40% of trials hit the unlock modal; book-call CTAs fire ~3×/month (invisible CTA).</li>
+</ul>
+
+<h2>6. Events with NO emitter in the repo (external automations)</h2>
+<ul>
+  <li>Close stage mirrors: <code>Qualification</code>, <code>Discovery / Demo</code>, <code>Proposal / Buying</code>, <code>Won</code>, <code>Won (Renewed/Expanded)</code>, <code>Lost</code>, <code>No Show</code>, <code>Identification</code>, <code>Prospecting</code>, <code>Evaluation / Scoping</code> (<span class="qq">Q6</span>).</li>
+  <li>Orphans: <code>high_value_signup</code> · <code>scheduled_demo_*</code> / <code>canceled_demo_*</code> (per-rep!) · <code>scheduled_ai_agent_call*</code> / <code>answered_scheduled_ai_agent_call</code> · <code>scheduled_trial_agent_call</code> · <code>api_credits_added/renewed</code> — presumed Close/make.com/Calendly automations (<span class="qq">Q6</span>).</li>
+  <li>Import namespace: "Platform Usage" (Cost prop = internal credits), "Campaign Media Scraped", "Intercom Conversation", "Scheduled Meeting", … (<span class="qq">Q24</span>).</li>
+</ul>
+
+<h2>7. Client-side tags &amp; the same-action cross-map</h2>
+<div class="scroll"><table>
+  <tr><th>User action</th><th>Client fires</th><th>Server fires</th><th>Risk</th></tr>
+  <tr><td>Signup</td><td>GTM <code>successful_signup</code> (+raw email!) · GA4 <code>signup</code>/<code>google_signup</code> · Clarity "New Signup"</td><td>webhook <code>signup</code> · Bubble ip-capture</td><td>different names per tool; joins only via user_id/email</td></tr>
+  <tr><td>Trial start</td><td>GTM <code>successful_trial_started</code> · GA4 <code>trial_success</code></td><td>webhook trial event · AWS visit pixel (?u=1)</td><td>GA4 <code>trial_success</code> ALSO fires on the onboarding path — inflated in GA4</td></tr>
+  <tr><td>Payment</td><td>GA4 <code>payment_success</code></td><td>webhook payment events · GA4 MP <code>purchase</code> (server, prices {99,499,1200} only, hardcoded ids <span class="qq">Q11</span>)</td><td>GA4 gets BOTH a client and a server event — double-count risk</td></tr>
+  <tr><td>Search</td><td>Clarity "Hype Search" (hype only)</td><td>proxy webhook search event + AWS pixel</td><td>—</td></tr>
+</table></div>
+<ul>
+  <li>Tag inventory: GTM ×2 (contents unaudited, <span class="qq">Q15</span>), GA4 <code>G-TD1DHH379G</code>, Google Ads, Clarity <code>kaw00ybizl</code> (identify by email only), Segment "PRophet" (identify-only, no track — dormant? <span class="qq">Q16</span>), VWO (imai-domain only), Sentry.</li>
+  <li class="danger">PII: raw email flows into the GTM dataLayer, Clarity, and Segment; all ~50 white-label domains load IMAI's tags; no consent/CMP found in code (<span class="qq">Q12</span>).</li>
+</ul>
+
+<h2>8. Side channels (non-event outbound)</h2>
+<div class="scroll"><table>
+  <tr><th>Channel</th><th>What</th><th>Status</th></tr>
+  <tr><td>GA4 Measurement Protocol</td><td>server-side <code>purchase</code> (payments.service.ts:1789-1810), prices {99,499,1200} only</td><td class="danger">ungated, hardcoded measurement_id + api_secret (<span class="qq">Q11</span>)</td></tr>
+  <tr><td>make.com</td><td>rich cancellation payload (<code>CANCELLATION_WEBHOOK_URL</code>) + email-test hook</td><td>email-test hook hardcoded</td></tr>
+  <tr><td>Slack ×5</td><td>quota blocks, cancellations, bad-card trials, mail failures, deploys</td><td class="danger">all hooks hardcoded in source (R8 unmerged) — rotation recommended</td></tr>
+  <tr><td>Bubble</td><td>ip-capture (login/signup), blocked-signup, report-error, generic (dead?)</td><td>hardcoded bearer token</td></tr>
+  <tr><td>proxy billing tables</td><td>usage metering on EVERY proxied response</td><td class="ok">parallel usage truth — unaffected by webhook loss; use for cross-validation</td></tr>
+  <tr><td><code>ai_usage</code> table</td><td>AI token/cost accounting (backend/main + brand-safety)</td><td>internal cost data, not behavioral</td></tr>
+</table></div>
+
+<footer>Full dictionary with payloads: <code>docs-events-audit/02-event-dictionary.md</code> · emitters: <code>03-emitters.md</code> · client tags: <code>04-frontend-analytics.md</code> · Mixpanel Lexicon: <code>12-mixpanel-lexicon.md</code></footer>
+</div>
+</body>
+</html>

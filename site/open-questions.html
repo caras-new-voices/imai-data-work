@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IMAI — Open Questions</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><div class="inner">
+  <a class="brand" href="index.html">IMAI · How It Works</a>
+  <nav>
+    <a href="index.html">Overview</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="events.html">Events &amp; Analytics</a>
+    <a href="features.html">Features</a>
+    <a href="user-flows.html">User Flows</a>
+    <a href="metrics.html">Metrics &amp; Money</a>
+    <a class="on" href="open-questions.html">Open Questions</a>
+  </nav>
+</div></header>
+<div class="wrap">
+
+<h1>Open questions (Q1–Q29)</h1>
+<p class="sub">What we don't know, why it matters, and exactly how to answer it. Source of truth: <code>docs-events-audit/OPEN_QUESTIONS.md</code> (statuses as of 2026-07-22).</p>
+
+<div class="good"><b>The 15-minute unlock:</b> one SSH session on <code>discovery-prod</code> answers Q1 (grep WEBHOOK in the three .env files), half of Q3 (grep PIXEL_DB_*), and Q29 (git status in the checkout). It's the highest-leverage quarter hour available.</div>
+
+<h2>Top blockers</h2>
+<div class="scroll"><table>
+  <tr><th>ID</th><th>Question</th><th>Why it matters</th><th>How to answer</th></tr>
+  <tr><td class="qq">Q1</td><td>Prod value of <code>CLOSE_WEBHOOK_URL</code> (+ per-label + cancellation variants)</td><td>Identifies the receiver of ALL server events — the entire external pipeline</td><td>SSH grep on discovery-prod (cheat sheet in the register)</td></tr>
+  <tr><td class="qq">Q3</td><td>Where the logs/"pixel" Postgres runs</td><td>Canonical event store (~4.6M rows) + Phyllo ingestion; gates every payload-level analysis</td><td>PIXEL_DB_* in backend/main prod .env (same SSH)</td></tr>
+  <tr><td class="qq">Q6</td><td>IMAI Close org access (connector reaches NewVoices)</td><td>Manual/enterprise deal dollars = majority of revenue; orphan-event emitters</td><td>Close login for IMAI's org</td></tr>
+  <tr><td class="qq">Q24</td><td>What runs the Mixpanel $import batch (Platform Usage ~1.6M/30d)</td><td>The platform's highest-volume tracking is unowned; duplicates snake events</td><td>Mixpanel project settings → service accounts; or Q1/Q2</td></tr>
+  <tr><td class="qq">Q27</td><td>Webhook→Mixpanel sync strips ALL payload properties</td><td>Blocks reason/plan/amount breakdowns in Mixpanel (forced the gate audit onto geo proxies)</td><td>Sync-job owner (Q4); interim: logs DB</td></tr>
+  <tr><td class="qq">Q28</td><td>Stripe→Mixpanel integration completeness + $599/$959/$175 plan mapping</td><td>Gates trusting the −55% revenue trend</td><td>Compare 2–3 months vs Stripe dashboard; prod package tables</td></tr>
+  <tr><td class="qq">Q29</td><td>Were the R-series patches ever deployed out-of-band?</td><td>Decides whether prod behavior matches the repo or the patched docs; deploy-drift risk</td><td>git status on the prod VM; created_list rows in imai_events</td></tr>
+</table></div>
+
+<h2>Full register</h2>
+<div class="scroll"><table>
+  <tr><th>ID</th><th>Area</th><th>Question (short)</th><th>Status</th></tr>
+  <tr><td class="qq">Q1</td><td>Pipeline</td><td>Webhook receiver URL in prod</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q2</td><td>Pipeline</td><td>Lambda(s) behind the AWS pixel gateways + write target</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q3</td><td>Pipeline</td><td>Logs-DB host/owner (new: PIXEL_DB_* env evidence; also hosts phyllo_webhooks)</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q4</td><td>Pipeline</td><td>imai_events→Mixpanel sync job + schedule + watermark writer</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q5</td><td>Pipeline</td><td>Klaviyo mirror mechanism + ~10% loss cause</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q6</td><td>Pipeline</td><td>Emitter of orphan events (high_value_signup, scheduled_demo_*, AI-agent calls)</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q7</td><td>Pipeline</td><td>Invisible repos holding pixel/webhook/sync code?</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q8</td><td>Pipeline</td><td>backend/scraper + frontend-logger (on VM, not in repo)</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q9</td><td>Taxonomy</td><td>created_campaign + campaign_created both fire — intentional?</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q10</td><td>Taxonomy</td><td>Proxy emitter has NO env gate (R1 never merged)</td><td>OPEN (reverted)</td></tr>
+  <tr><td class="qq">Q11</td><td>Taxonomy</td><td>GA4 MP purchase: hardcoded ids/secret, {99,499,1200} allowlist (R2 never merged)</td><td>OPEN (reverted)</td></tr>
+  <tr><td class="qq">Q12</td><td>Tags/PII</td><td>PII in event stream + tags reviewed for GDPR/consent? (no CMP in code)</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q13</td><td>Taxonomy</td><td>White-label identity stripped — tag instead?</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q14</td><td>Validation</td><td>Per-event volume/fill-rate vs dictionary (SQL ready; also proves Q29)</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q15</td><td>Tags</td><td>Contents of both GTM containers; is the second intentional?</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q16</td><td>Tags</td><td>Segment "PRophet" identify-only — dead or a feed?</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q17</td><td>AWS pixel</td><td>Why trial-activation + search specifically; collector schema</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q18</td><td>Tags</td><td>VWO experiments; Clarity retention/reviewers</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q19</td><td>Mixpanel</td><td>Identity resolution + measured sync lag/loss (inventory done)</td><td>PARTIAL</td></tr>
+  <tr><td class="qq">Q20</td><td>Mixpanel</td><td>Which of the 62 dashboards the team actually uses (inventory done)</td><td>PARTIAL</td></tr>
+  <tr><td class="qq">Q21</td><td>Pixel</td><td>Canonical conversion ingestion: Bubble wf/* vs /tracking/conversion</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q22</td><td>Security</td><td>Proxy CORS fully open + dead allowlist — intentional?</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q23</td><td>Infra</td><td>No trust proxy → @Ip() sees the LB; blocks ipify removal</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q24</td><td>Mixpanel</td><td>Title-Case namespace source (Stripe integration + $import job identified; job owner unknown)</td><td>PARTIAL</td></tr>
+  <tr><td class="qq">Q25</td><td>Mixpanel</td><td>"Influencer Search" vs influencer_discovery_search 41% apart</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q26</td><td>Mixpanel</td><td>SL family, pr_sent_pitch, first_campaign_created never reach Mixpanel</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q27</td><td>Mixpanel</td><td>Sync strips ALL payload properties</td><td>OPEN</td></tr>
+  <tr><td class="qq">Q28</td><td>Money</td><td>Stripe integration completeness; $599/$959/$175 plan mapping (not in code — DB rows)</td><td>PARTIAL</td></tr>
+  <tr><td class="qq">Q29</td><td>Deploy</td><td>R-series patches deployed out-of-band?</td><td>OPEN</td></tr>
+</table></div>
+
+<h2>Access needed (who can unblock what)</h2>
+<div class="scroll"><table>
+  <tr><th>Access</th><th>Unblocks</th></tr>
+  <tr><td>SSH to discovery-prod (15 min)</td><td>Q1, Q3 (host), Q8, Q29 — and by extension Q4/Q5/Q13</td></tr>
+  <tr><td>AWS console (eu-central-1 owner)</td><td>Q2, Q3, Q17, likely Q4</td></tr>
+  <tr><td>Logs-DB read-only credentials</td><td>Q14, Q27-interim (gate payloads), Q9, funnel cross-validation</td></tr>
+  <tr><td>IMAI Close org login</td><td>Q6 + the majority-of-revenue picture</td></tr>
+  <tr><td>Stripe dashboard (read)</td><td>Q28 → trust/adjust the −55% revenue trend</td></tr>
+  <tr><td>GTM / Klaviyo / Segment / VWO admin</td><td>Q15, Q5, Q16, Q18</td></tr>
+  <tr><td>make.com account</td><td>Q6, possibly Q1's receiver</td></tr>
+</table></div>
+
+<footer>Register with full text + evidence trail: <code>docs-events-audit/OPEN_QUESTIONS.md</code> · latest verification pass: <code>REFRESH-NOTES-2026-07-22.md</code></footer>
+</div>
+</body>
+</html>
