@@ -1,0 +1,212 @@
+{
+  "$schema_note": "Machine-readable architecture map of the IMAI platform (Discovery-imai). Written for the next agent starting a feature: read `meta` for provenance and trust level, `services` for where code lives, `event_pipeline` + `invariants` before touching anything analytics-related, `open_questions` for known unknowns. Sibling human version: imai-architecture.html.",
+  "meta": {
+    "generated_at": "2026-07-21",
+    "generated_by": "Claude session on caras-new-voices/imai-data-work",
+    "provenance": "Derived from the 2026-07-20/21 full code audit of InfluencerMarketing-Ai/Discovery-imai at base commit df73c535 (docs-events-audit/ in this repo), plus live DNS/HTTP probes and live Mixpanel measurement. This session could NOT re-clone Discovery-imai (cross-owner attach blocked) - file:line references are from df73c535 and may drift.",
+    "trust": "File paths and line numbers verified at df73c535; anything marked presumed/unconfirmed carries an open_questions id.",
+    "how_to_regenerate": "Start a session rooted on InfluencerMarketing-Ai/Discovery-imai, re-run the sweep described in docs-events-audit/EVENTS_AUDIT_PLAN.md Part 1, and update this file + the HTML. Do NOT push to Discovery-imai (standing rule): all documentation lives in caras-new-voices/imai-data-work."
+  },
+  "product": {
+    "name": "IMAI / InfluencerMarketing.ai",
+    "what": "Influencer-marketing SaaS: influencer discovery/search, influencer reports, campaigns with post tracking, lists, geo analysis, PR/journalist outreach, social listening, brand safety, and a customer-installable e-commerce conversion pixel.",
+    "revenue_engines": [
+      {"name": "self-serve", "detail": "Stripe (+ Cardcom for IL), plans observed at $99/$175/$499/$599/$959/$1199-1200 + custom; 7-day trial, day-7 autocharge; abuse gate at card entry"},
+      {"name": "sales-led", "detail": "Manual/invoiced enterprise deals managed in Close CRM - the MAJORITY of paying accounts; invisible to Stripe and to most product analytics"}
+    ]
+  },
+  "repository": {
+    "name": "InfluencerMarketing-Ai/Discovery-imai",
+    "base_commit_audited": "df73c535",
+    "monorepo_layout": {
+      "backend/main": "Primary API - NestJS/TypeScript",
+      "proxy": "API proxy + usage metering - Express/JavaScript",
+      "backend/social-listening": "Social-listening pipeline - NestJS/TypeScript",
+      "backend/brand-safety": "Brand-safety reports (AI analysis); calls back to main",
+      "backend/cloud/campaign-tracker": "Campaign post-metrics scraper - Cloud Run",
+      "front/imai": "Web app - Angular",
+      "sdk": "Customer conversion pixel: sdk/pixel.js + Shopify web-pixel extension + WooCommerce plugin",
+      "deploy": "deploy/deploy.js - pm2-based deploy to GCE VMs; announces to Slack"
+    },
+    "server_only_not_in_repo": [
+      {"name": "backend/scraper", "note": "runs on discovery-prod, absent from repo", "open_question": "Q8"},
+      {"name": "backend/frontend-logger", "note": "receives frontend POST /logger/log error events", "open_question": "Q8"}
+    ]
+  },
+  "services": [
+    {
+      "id": "backend-main",
+      "path": "backend/main",
+      "stack": "NestJS / TypeScript / Postgres (TypeORM)",
+      "modules": ["users (auth, teams, onboarding, cancel flows)", "payments (Stripe + Cardcom, trials, abuse gate, upgrades)", "reports (influencer reports + quotas)", "campaigns (+ campaigns-api bulk)", "lists", "geo", "entity/PR (journalists, media lists, pitches)", "tracking (conversion-pixel receiver: /tracking/click, /sdk-click, /conversion, /ping, Shopify OAuth + GDPR webhooks)", "ai-usage (token/cost accounting -> ai_usage table)", "usage-ai / usage-board (internal analytics catalog SCHEMA.md, health score usage-board.service.ts:1909)", "mail", "shared/integration-endpoints.ts (env-first secrets since R8)"],
+      "key_files": {
+        "webhook emitter": "src/users/services/users.service.ts:3729 (sendPipeDriveWebhook - despite the name, posts to CLOSE_WEBHOOK_URL)",
+        "trial-event bridge endpoint": "src/users/users.controller.ts:2382",
+        "trial friction emit + dedup cache": "users.service.ts:1652-1936",
+        "abuse gate": "src/payments/payments.service.ts:1545 (free_trial_blocked)",
+        "trial start": "payments.service.ts:1634",
+        "conversion event": "payments.service.ts:500/:1710/:2210 (new_subscription_payment, 3 paths)",
+        "GA4 server-side purchase": "payments.service.ts:1798 (Measurement Protocol, prices {99,499,1200} only, hardcoded client_id - Q11)",
+        "cancel ternary": "users.service.ts:2190 (cancel_trial vs cancel_subscription by endTrial)",
+        "health score": "usage-board.service.ts:1909",
+        "CI event guardrail": "src/tests/event-dictionary-sync.spec.ts (R21)"
+      }
+    },
+    {
+      "id": "proxy",
+      "path": "proxy",
+      "stack": "Express / JavaScript",
+      "purpose": "Fronts the search/reports APIs; meters ALL API usage to Postgres on every proxied response; emits the two highest-volume events.",
+      "key_files": {
+        "webhook emitter": "index.js:112 (prod-gated since R1 2026-07-20: NODE_ENV==='production' && !STAGING - note different convention than backend/main's 'prod')",
+        "search events": "index.js:292 (influencer_discovery_search, userInitiated===true), index.js:299 (paginated)",
+        "usage metering": "index.js:327-497 onProxyRes: insertBillingEntity, decrementUserBalanceByApiKey, insertMannyBillingEntity, incrementSubscriptionCount; x-tokens-cost header; package types 1=Search 2=Reports 4=SocialListening 6=Overlap",
+        "CORS": "allowed-domain.prod.js list (59 origins) is DEAD CODE - env check uses 'prod' but proxy runs 'production', and cors origin option is commented out => CORS fully open (Q22)"
+      }
+    },
+    {
+      "id": "social-listening",
+      "path": "backend/social-listening",
+      "stack": "NestJS / TypeScript",
+      "purpose": "SL segment pipeline (mentions, trends).",
+      "key_files": {
+        "webhook emitter": "src/users/social-listening-users.service.ts:36 (prod-gated, NO white-label override)",
+        "pipeline events": "segment-timing.service.ts:43 (segment_created), :195 (report_ready)",
+        "observability": "pino SL_EVENTS dotted names (segment.create.*, quota.*) -> GCP log metrics - NOT analytics"
+      }
+    },
+    {
+      "id": "brand-safety",
+      "path": "backend/brand-safety",
+      "stack": "Node/JS",
+      "purpose": "AI brand-safety reports; logs AI cost to ai_usage; callback to main: MAIN_BACKEND_URL/brand-safety-report/:id/complete"
+    },
+    {
+      "id": "campaign-tracker",
+      "path": "backend/cloud/campaign-tracker",
+      "stack": "Cloud Run",
+      "purpose": "Scrapes campaign post metrics (source of 'Campaign Media Scraped'-type data). Not analytics infra."
+    },
+    {
+      "id": "frontend",
+      "path": "front/imai",
+      "stack": "Angular",
+      "tracking_layers": [
+        "GTM GTM-PBZ6TBF (index.html:26) - 4 dataLayer events incl. raw email (successful_signup, successful_trial_started, successful_onboarding_completed)",
+        "GTM GTM-5TRH876J 'LEADERS' (index.html:40) - second container, purpose unconfirmed (Q15)",
+        "Google Ads gtag AW-17928663214",
+        "GA4 G-TD1DHH379G via ngx-google-analytics (main.ts:198) - ~11 funnel events; trial_success double-fires (credit-card AND onboarding paths)",
+        "MS Clarity kaw00ybizl (runtime-injected, identify(email) only - no user-id segmentation)",
+        "Segment 'PRophet' sW20Nx... - identify-only, no track calls (Q16)",
+        "VWO 1044481 - imai-domain only",
+        "Sentry (errors)",
+        "Legacy AWS visit pixel: <script src=https://t.imai.co> injected at trial activation (home.component.ts:116, ?u=1) + influencer search (influencers.component.ts:351)"
+      ],
+      "bridges": [
+        "POST /data/pipedrive/trial-event (trial-gating.service.ts:49) - ONLY path where the client names a server event (whitelisted prefixes trial_upgrade_/trial_book_call_/trial_unlock_modal_/trial_sample_report_)",
+        "POST /logger/log (error-logging.service.ts:10) -> server-only frontend-logger (Q8)"
+      ],
+      "warnings": ["All ~50 white-label domains load IMAI's client tags (Q12/Q13/Q15)", "No consent/CMP found in code", "Raw email in dataLayer/Clarity/Segment"]
+    },
+    {
+      "id": "sdk-conversion-pixel",
+      "path": "sdk",
+      "purpose": "CUSTOMER-facing e-commerce attribution (brands install on their stores). Completely separate from product analytics.",
+      "components": ["sdk/pixel.js v1.0.0 served from cdn.influencermarketing.ai/pixel.js", "Shopify web-pixel extension (sdk/influencermarketing-pixel/, activated via webPixelCreate)", "WooCommerce plugin (sdk/plugins/imai-tracking-woocommerce/)"],
+      "flow": "?imai_click_id / ?imai_sc -> first-party cookie _imai_clickid (30d default) -> POST /tracking/ping|sdk-click|conversion -> AttributionService (clickId -> coupon -> IP 24h fallback) -> CampaignInfluencerClicks/Conversions/ConversionProducts (prod DB)",
+      "warnings": ["client-side IP via api64.ipify.org (removal candidate, blocked on Q23 trust-proxy)", "?imai_env=local|stage backdoor persists in localStorage", "legacy Bubble wf/order-conversion-* ingestion still shown in tutorial - canonical path undecided (Q21)"]
+    }
+  ],
+  "infrastructure": {
+    "gcp": {
+      "compute": "GCE VMs discovery-prod / discovery-stag, project 'Leaders Prod', pm2 process manager, deployed by deploy/deploy.js",
+      "cloud_run": ["campaign-tracker"],
+      "storage": "GCS (all in-repo object storage)",
+      "dns_evidence": "imai.co / app.influencermarketing.ai -> 34.34.53.159 (GCE); cdn.influencermarketing.ai -> 34.96.68.123 (GCP LB)"
+    },
+    "aws": {
+      "role": "ONLY the legacy visit-pixel collector + script bucket. Nothing else confirmed.",
+      "api_gateways_eu_central_1": [
+        {"id": "d-gnyi890n7g", "domain": "t.imai.co", "role": "visit-beacon collector (trial activation + search moments)"},
+        {"id": "47dwgl20q6", "role": "white-label pixel beacon target (?saveData=true&url=...&<full query: UTM/gclid>)"}
+      ],
+      "s3": "influencerprofiles (ap-northeast-1) serves the 373-byte white-label pixel.js (last modified 2023-11-28)",
+      "unconfirmed": "Lambda behind the gateways + write target (presumed logs DB) = Q2; logs DB host possibly RDS = Q3"
+    },
+    "bubble_cloudflare": {
+      "domain": "api.influencermarketing.ai (Cloudflare 104.19.x -> Bubble.io)",
+      "role": "Legacy webhook endpoints: imai-ip-capture (login/signup IP), blocked-signup, imai-report-error, imai-webhooks (dead?), wf/order-conversion-* (legacy conversion ingestion, Q21). White-label variant api.igrdr.com."
+    },
+    "external_pipeline_not_in_any_visible_repo": {
+      "role": "THE critical unknown: receives CLOSE_WEBHOOK_URL POSTs, writes imai_events, syncs to Mixpanel/Klaviyo/Close",
+      "candidates": "AWS Lambda / make.com / a VM job",
+      "open_questions": ["Q1 (webhook URL value)", "Q4 (Mixpanel sync job)", "Q7 (invisible repos)"]
+    }
+  },
+  "data_stores": [
+    {"name": "prod Postgres", "contents": "users (user.mixpanel_sync watermark col), user_payments (AUTHORITATIVE self-serve revenue: whole USD, epoch created), campaign tables (CampaignInfluencerClicks/Conversions/ConversionProducts), client_domains, ai_usage", "access_status": "no access from data sessions yet"},
+    {"name": "logs / 'pixel' Postgres", "contents": "imai_events (~4.6M rows; columns id,event,user_id,email,name,amount,date,main_user_id,admin_user_id,lead_id,ip,reseller_stripe_cuid,user_stripe_cuid), views trial_analytics_report/user_base_info/user_daily_usage, google_ads_* sync tables, resellers, click_scoring (dead since 2024)", "host": "unknown (Q3)", "access_status": "no access; validation SQL ready in 08-data-quality.md"},
+    {"name": "Mixpanel project 3432835", "contents": "104 events in 4 namespaces (see event_pipeline.destinations). Lexicon descriptions + tags + business context applied 2026-07-21", "access_status": "connector (per-session toggle)"},
+    {"name": "Klaviyo", "contents": "7 lifecycle metrics + ~97 event-named lists (~10% loss)", "access_status": "none (Q5)"},
+    {"name": "Close CRM (IMAI org)", "contents": "leads/opportunities/deals - the MAJORITY of paying accounts; stages mirror back into imai_events", "access_status": "connector reaches NewVoices org, NOT IMAI's (Q6)"}
+  ],
+  "event_pipeline": {
+    "summary": "Three fire-and-forget server emitters POST ~55 event names + dynamic trial_* families to env-configured CLOSE_WEBHOOK_URL(_<LABEL>). No retry/queue/dead-letter anywhere - all downstream loss is consistent with that. External pipeline writes imai_events, then fans out.",
+    "emitters": [
+      {"service": "backend-main", "file": "users.service.ts:3729", "gate": "NODE_ENV==='prod'", "enrichment": "adds name/email/main_user_id via user lookup", "white_label": "per-label URL, identity STRIPPED from payload"},
+      {"service": "proxy", "file": "index.js:112", "gate": "production && !STAGING (since R1)", "white_label": "same via DB label lookup"},
+      {"service": "social-listening", "file": "social-listening-users.service.ts:36", "gate": "NODE_ENV==='prod'", "white_label": "none - default URL only"}
+    ],
+    "frontend_bridge": "POST /data/pipedrive/trial-event: client picks whitelisted trial_* names; errors swallowed both sides; limit-family deduped once per user+event per day",
+    "flow": "emitters -> CLOSE_WEBHOOK_URL (receiver UNKNOWN, Q1) -> imai_events (logs DB) -> {Mixpanel sync (lossy/lagging, strips ALL payload props - Q27), Klaviyo (~10% loss), Close CRM (stages mirror BACK as events)}",
+    "destinations_mixpanel_namespaces": [
+      {"tag": "webhook-pipeline", "shape": "snake_case", "notes": "payload properties STRIPPED (Q27); renames: new_subscription_trial->'Free Trial Signup', cancel_subscription->'Cancelled Subscription'"},
+      {"tag": "server-import", "shape": "Title-Case", "notes": "$import:true batch job (Platform Usage ~1.6M/30d, Login, Influencer Search...); source job unidentified (Q24); DUPLICATES several snake_case events"},
+      {"tag": "stripe-integration", "shape": "Title-Case", "notes": "Payment Attempt / Added Payment Method with Stripe-native props incl. Amount Charged (whole USD) - includes renewals+dunning, NOT funnel steps; completeness unverified (Q28)"},
+      {"tag": "crm-mirror", "shape": "Title-Case stage names", "notes": "Close pipeline stages; no status_id (Sales vs CS ambiguous, Q6); NOT product events"}
+    ],
+    "side_channels": [
+      "GA4 MP server purchase (payments.service.ts:1798, prices {99,499,1200}, hardcoded client_id - Q11)",
+      "make.com: CANCELLATION_WEBHOOK_URL (rich cancel payload) + hardcoded email-test hook",
+      "Slack: quota blocks / cancellations / bad-card trials / mail failures / deploys (secrets moved to env by R8; rotation pending)",
+      "Bubble: ip-capture, blocked-signup, report-error, generic imai-webhooks (dead?)",
+      "proxy billing tables: parallel DB-side usage truth, unaffected by webhook loss",
+      "ai_usage table: AI cost accounting (backend/main + brand-safety)"
+    ]
+  },
+  "invariants_for_next_agent": [
+    "NEVER push to InfluencerMarketing-Ai/Discovery-imai from data-work sessions (standing user rule). All docs/analysis live in caras-new-voices/imai-data-work.",
+    "NEVER build dollar analysis on webhook events (36% of recurring dollars, June 2026). Dollars = prod user_payments + Close; Stripe-integration Mixpanel dollars usable for Stripe engine only, pending Q28.",
+    "Never mix Mixpanel namespaces in one KPI ('Login' vs user_logged_in, 'Signup' vs signup, 'Influencer Search' vs influencer_discovery_search 41% apart - Q25).",
+    "Exclude user_created_by_admin accounts from funnels; roll team members up via main_user_id; calendar-day windows.",
+    "Event birth dates: cancel_trial 2026-04-22; trial_* friction family 2026-06-30; created_list 2026-07. Trends crossing those dates are measurement changes.",
+    "payment_failed is dunning noise - count DISTINCT users.",
+    "created_campaign AND campaign_created both fire on create (Q9) - dedupe.",
+    "amount fields are WHOLE USD; IL-billed x1.17 VAT on some paths; Close deal values are cents.",
+    "Three things are called 'pixel': customer conversion SDK (sdk/pixel.js -> /tracking/*), legacy AWS visit pixel (t.imai.co), and the logs DB nickname. Do not conflate.",
+    "Event delivery is best-effort by design (no retry/queue) - expect gaps downstream.",
+    "The proxy and backend/main use DIFFERENT prod conventions ('production' vs 'prod') - check before adding env gates.",
+    "trial_analytics_report.cancel_date counts any %cancel% event incl. started_cancellation_process - do not trust it for churn."
+  ],
+  "open_questions_register": {
+    "location": "docs-events-audit/OPEN_QUESTIONS.md (Q1-Q28, statuses + how-to-answer)",
+    "top_blockers": [
+      {"id": "Q1", "summary": "Value of CLOSE_WEBHOOK_URL in prod (one grep on discovery-prod) - identifies the entire external pipeline"},
+      {"id": "Q2/Q3", "summary": "AWS Lambda behind the pixel gateways + logs-DB host/access"},
+      {"id": "Q6", "summary": "IMAI Close org access (session connector reaches NewVoices) - manual revenue + orphan-event emitters"},
+      {"id": "Q24", "summary": "Which job runs the Mixpanel $import batch (highest-volume tracking on the platform)"},
+      {"id": "Q27", "summary": "Webhook->Mixpanel sync strips all payload properties"},
+      {"id": "Q28", "summary": "Stripe->Mixpanel integration completeness (gates trusting the revenue trend)"}
+    ]
+  },
+  "related_docs": {
+    "index": "docs-events-audit/00-overview.md",
+    "event_dictionary": "docs-events-audit/02-event-dictionary.md",
+    "emitters_and_side_channels": "docs-events-audit/03-emitters.md",
+    "frontend_tags": "docs-events-audit/04-frontend-analytics.md",
+    "conversion_pixel": "docs-events-audit/06-conversion-pixel.md",
+    "mixpanel_lexicon": "docs-events-audit/12-mixpanel-lexicon.md",
+    "latest_reports": ["docs-events-audit/13-sales-funnel-report-2026-07.md", "deliverables/Sales-Funnel-Report-2026-07.docx", "deliverables/State-of-Spending-Interim.docx"],
+    "patches_vs_df73c535": "discovery-imai-patches/ (0005 redacted - see its README)"
+  }
+}
