@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IMAI — User Journey Map</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .jmap{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px}
+  .jmap svg{display:block;min-width:1100px;width:100%;height:auto;font:12px system-ui,Segoe UI,Roboto,sans-serif}
+  svg .box{fill:var(--card);stroke:var(--accent);stroke-width:1.6;rx:8}
+  svg .box.good{stroke:var(--accent2)}
+  svg .box.bad{stroke:var(--danger)}
+  svg .box.warn{stroke:var(--warn)}
+  svg .box.feat{stroke:var(--accent);stroke-dasharray:none;opacity:.95}
+  svg .dia{fill:var(--chip);stroke:var(--warn);stroke-width:1.6}
+  svg text{fill:var(--ink)}
+  svg .t{font-weight:700;font-size:12.5px}
+  svg .s{fill:var(--muted);font-size:10.5px}
+  svg .ev{fill:var(--accent2);font-size:10px;font-family:var(--mono)}
+  svg .lbl{fill:var(--muted);font-size:10.5px;font-style:italic}
+  svg .edge{stroke:var(--muted);stroke-width:1.6;fill:none;marker-end:url(#arr)}
+  svg .edge.loop{stroke-dasharray:5 4}
+  svg .edge.bad{stroke:var(--danger)}
+  svg .edge.good{stroke:var(--accent2)}
+  svg .edge.both{marker-start:url(#arrs)}
+</style>
+</head>
+<body>
+<header class="site"><div class="inner">
+  <a class="brand" href="index.html">IMAI · How It Works</a>
+  <nav>
+    <a href="index.html">Overview</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="events.html">Events &amp; Analytics</a>
+    <a href="features.html">Features</a>
+    <a href="user-flows.html">User Flows</a>
+    <a class="on" href="journey.html">Journey Map</a>
+    <a href="metrics.html">Metrics &amp; Money</a>
+    <a href="open-questions.html">Open Questions</a>
+  </nav>
+</div></header>
+<div class="wrap">
+
+<h1>User journey map</h1>
+<p class="sub">One flowchart of the whole self-serve journey: every code touchpoint in sequence, the decision points, and the loops users circle back through. Solid arrows = forward path · dashed arrows = loops/returns · diamonds = decisions in code. File refs verified @ <code>da98fcf2</code>. Numbers = June/July 2026 measurements.</p>
+
+<div class="jmap scroll">
+<svg viewBox="0 0 1120 1560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="IMAI user journey flowchart">
+<defs>
+  <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#8a93a3"/></marker>
+  <marker id="arrs" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 L0 5 L10 10 z" fill="#8a93a3"/></marker>
+</defs>
+
+<!-- ===== SPINE: acquisition ===== -->
+<rect class="box" x="420" y="16" width="280" height="64" rx="8"/>
+<text x="560" y="36" text-anchor="middle" class="t">Visits imai.co / white-label site</text>
+<text x="560" y="52" text-anchor="middle" class="s">GTM ×2 · GA4 · Clarity · Ads tags fire</text>
+<text x="560" y="66" text-anchor="middle" class="ev">AWS visit pixel beacons UTM/gclid</text>
+
+<path class="edge" d="M560 80 V104"/>
+
+<rect class="box" x="420" y="106" width="280" height="72" rx="8"/>
+<text x="560" y="126" text-anchor="middle" class="t">Registers (email or Google)</text>
+<text x="560" y="142" text-anchor="middle" class="s">registration.component.ts · google-sso.component.ts</text>
+<text x="560" y="157" text-anchor="middle" class="s">backend users.service.ts:3046</text>
+<text x="560" y="171" text-anchor="middle" class="ev">signup · GTM successful_signup · Bubble ip-capture</text>
+
+<path class="edge" d="M560 178 V206"/>
+
+<!-- onboarding decision -->
+<polygon class="dia" points="560,206 680,246 560,286 440,246"/>
+<text x="560" y="240" text-anchor="middle" class="t">Onboarding?</text>
+<text x="560" y="256" text-anchor="middle" class="s">skipOnboardingLabels incl. 'imai'</text>
+<text x="560" y="270" text-anchor="middle" class="s">since 2026-07-21</text>
+
+<!-- legacy onboarding branch (left) -->
+<path class="edge loop" d="M440 246 H320"/>
+<text x="380" y="238" text-anchor="middle" class="lbl">some white-labels</text>
+<rect class="box" x="60" y="210" width="260" height="72" rx="8"/>
+<text x="190" y="230" text-anchor="middle" class="t">Onboarding wizard (legacy path)</text>
+<text x="190" y="246" text-anchor="middle" class="s">onboarding.component.ts · users.controller.ts:1777</text>
+<text x="190" y="261" text-anchor="middle" class="ev">finished_onboarding (collapsing since Jul 21)</text>
+<text x="190" y="275" text-anchor="middle" class="ev">GTM successful_onboarding_completed</text>
+<path class="edge loop" d="M190 282 V330 Q190 344 204 344 H418"/>
+
+<!-- main: straight to trial -->
+<path class="edge" d="M560 286 V318"/>
+<text x="588" y="308" class="lbl">IMAI: straight to /trial</text>
+
+<rect class="box" x="420" y="320" width="280" height="76" rx="8"/>
+<text x="560" y="340" text-anchor="middle" class="t">Trial page — enters card</text>
+<text x="560" y="356" text-anchor="middle" class="s">credit-card.component.ts · payments.service.ts</text>
+<text x="560" y="371" text-anchor="middle" class="s">~86% of signups never get here (uninstrumented gap)</text>
+<text x="560" y="386" text-anchor="middle" class="ev">GA4 begin_checkout · Added Payment Method (Stripe)</text>
+
+<path class="edge" d="M560 396 V424"/>
+
+<!-- abuse gate decision -->
+<polygon class="dia" points="560,424 690,468 560,512 430,468"/>
+<text x="560" y="458" text-anchor="middle" class="t">Abuse gate</text>
+<text x="560" y="474" text-anchor="middle" class="s">payments.service.ts:1545</text>
+<text x="560" y="489" text-anchor="middle" class="s">multi-signup / card checks</text>
+
+<!-- blocked branch -->
+<path class="edge bad" d="M690 468 H818"/>
+<text x="754" y="460" text-anchor="middle" class="lbl">31% blocked</text>
+<rect class="box bad" x="820" y="430" width="250" height="76" rx="8"/>
+<text x="945" y="450" text-anchor="middle" class="t">BLOCKED — journey ends</text>
+<text x="945" y="466" text-anchor="middle" class="s">US 22% · UK 31% · PH 49% of card-enterers</text>
+<text x="945" y="481" text-anchor="middle" class="s">no recovery path exists (gap)</text>
+<text x="945" y="496" text-anchor="middle" class="ev">free_trial_blocked · Slack alert</text>
+
+<!-- pass -->
+<path class="edge good" d="M560 512 V540"/>
+<text x="592" y="534" class="lbl">card accepted</text>
+
+<rect class="box good" x="420" y="542" width="280" height="64" rx="8"/>
+<text x="560" y="562" text-anchor="middle" class="t">7-day trial starts · autocharge armed</text>
+<text x="560" y="578" text-anchor="middle" class="s">payments.service.ts:1634 · GTM/GA4 trial events</text>
+<text x="560" y="593" text-anchor="middle" class="ev">"Free Trial Signup" · AWS pixel ?u=1</text>
+
+<path class="edge" d="M560 606 V640"/>
+
+<!-- ===== HUB ===== -->
+<rect class="box" x="405" y="642" width="310" height="80" rx="8"/>
+<text x="560" y="664" text-anchor="middle" class="t">WORKSPACE HUB — the daily loop</text>
+<text x="560" y="680" text-anchor="middle" class="s">home.component.ts · Angular app shell</text>
+<text x="560" y="695" text-anchor="middle" class="s">median active cancel is ~4h in —</text>
+<text x="560" y="709" text-anchor="middle" class="s">value must land in the FIRST session</text>
+
+<!-- feature satellites: LEFT -->
+<rect class="box feat" x="40" y="600" width="280" height="72" rx="8"/>
+<text x="180" y="620" text-anchor="middle" class="t">Discovery Search</text>
+<text x="180" y="636" text-anchor="middle" class="s">influencers.component.ts → proxy index.js:292</text>
+<text x="180" y="650" text-anchor="middle" class="s">quota: consumeSearchQuota (~50s session window)</text>
+<text x="180" y="664" text-anchor="middle" class="ev">influencer_discovery_search · AWS pixel</text>
+<path class="edge both" d="M322 650 L403 668"/>
+
+<rect class="box feat" x="40" y="700" width="280" height="72" rx="8"/>
+<text x="180" y="720" text-anchor="middle" class="t">Influencer Reports ⭐ activation</text>
+<text x="180" y="736" text-anchor="middle" class="s">report.controller.ts:93-125 · daily/total quotas</text>
+<text x="180" y="750" text-anchor="middle" class="ev">created_report · first_report_created</text>
+<text x="180" y="764" text-anchor="middle" class="ev">= the canonical "activated" moment</text>
+<path class="edge both" d="M322 728 L403 692"/>
+
+<rect class="box feat" x="40" y="800" width="280" height="64" rx="8"/>
+<text x="180" y="820" text-anchor="middle" class="t">Lists · Geo analysis</text>
+<text x="180" y="836" text-anchor="middle" class="s">list.controller.ts:273 · geo.controller.ts:111</text>
+<text x="180" y="851" text-anchor="middle" class="ev">first_list_created · created_geo_analysis</text>
+<path class="edge both" d="M322 812 L410 716"/>
+
+<!-- feature satellites: RIGHT -->
+<rect class="box feat" x="800" y="600" width="280" height="72" rx="8"/>
+<text x="940" y="620" text-anchor="middle" class="t">Campaigns</text>
+<text x="940" y="636" text-anchor="middle" class="s">campaigns.controller.ts · campaign-tracker (Cloud Run)</text>
+<text x="940" y="650" text-anchor="middle" class="s">Phyllo creator-auth · post scraping</text>
+<text x="940" y="664" text-anchor="middle" class="ev">created_campaign ×2 (Q9) · influencer_added_…</text>
+<path class="edge both" d="M798 650 L717 668"/>
+
+<rect class="box feat" x="800" y="700" width="280" height="64" rx="8"/>
+<text x="940" y="720" text-anchor="middle" class="t">PR / journalist outreach</text>
+<text x="940" y="736" text-anchor="middle" class="s">entity/controllers/* (pitch AI)</text>
+<text x="940" y="751" text-anchor="middle" class="ev">pr_journalist_search · pr_generated_pitch</text>
+<path class="edge both" d="M798 724 L717 692"/>
+
+<rect class="box feat" x="800" y="796" width="280" height="64" rx="8"/>
+<text x="940" y="816" text-anchor="middle" class="t">Social listening · Brand safety</text>
+<text x="940" y="832" text-anchor="middle" class="s">backend/social-listening · backend/brand-safety</text>
+<text x="940" y="847" text-anchor="middle" class="ev">social_listening_segment_created · ai_usage</text>
+<path class="edge both" d="M798 806 L710 716"/>
+
+<!-- hub -> quota decision -->
+<path class="edge" d="M560 722 V756"/>
+<text x="600" y="746" class="lbl">every action checks quotas</text>
+
+<polygon class="dia" points="560,758 700,802 560,846 420,802"/>
+<text x="560" y="792" text-anchor="middle" class="t">Quota or gated feature hit?</text>
+<text x="560" y="808" text-anchor="middle" class="s">users.service.ts:1707 (total) · :1719 (daily)</text>
+<text x="560" y="823" text-anchor="middle" class="s">trial_feature_blocked :1940</text>
+
+<!-- no: loop back to hub -->
+<path class="edge loop" d="M420 802 Q360 802 360 740 Q360 700 403 696"/>
+<text x="366" y="770" text-anchor="middle" class="lbl">no — keep working</text>
+
+<!-- yes: friction -->
+<path class="edge" d="M560 846 V874"/>
+<text x="608" y="866" class="lbl">yes — 40% of trials</text>
+
+<rect class="box warn" x="405" y="876" width="310" height="80" rx="8"/>
+<text x="560" y="896" text-anchor="middle" class="t">FRICTION UX — the upsell moment</text>
+<text x="560" y="912" text-anchor="middle" class="s">trial-gating.service.ts:49 → POST pipedrive/trial-event</text>
+<text x="560" y="927" text-anchor="middle" class="ev">trial_unlock_modal_opened · trial_upgrade_&lt;15 placements&gt;</text>
+<text x="560" y="942" text-anchor="middle" class="ev">trial_book_call_* (fires ~3/mo — invisible CTA)</text>
+
+<!-- friction: dismiss loop back to hub (right side) -->
+<path class="edge loop" d="M715 900 Q790 890 790 780 Q790 706 717 700"/>
+<text x="812" y="790" text-anchor="middle" class="lbl">dismisses modal —</text>
+<text x="812" y="804" text-anchor="middle" class="lbl">circles back to work</text>
+
+<!-- friction -> upgrade checkout -->
+<path class="edge good" d="M655 956 Q700 1000 760 1020"/>
+<text x="748" y="990" text-anchor="middle" class="lbl">upgrades now (rare)</text>
+
+<!-- friction -> cancel -->
+<path class="edge bad" d="M465 956 Q400 1000 330 1030"/>
+<text x="360" y="990" text-anchor="middle" class="lbl">gives up</text>
+
+<!-- hub -> day7 (time passes) -->
+<path class="edge" d="M560 956 V1050"/>
+<text x="612" y="1006" class="lbl">day 6–8, still subscribed</text>
+
+<!-- ===== conversion row ===== -->
+<rect class="box bad" x="60" y="1032" width="270" height="88" rx="8"/>
+<text x="195" y="1052" text-anchor="middle" class="t">CANCEL FLOW</text>
+<text x="195" y="1068" text-anchor="middle" class="s">users.controller.ts:2349 → service :2195 ternary</text>
+<text x="195" y="1082" text-anchor="middle" class="s">41% of June trials · median ~4h in</text>
+<text x="195" y="1096" text-anchor="middle" class="ev">started_cancellation_process → cancel_trial /</text>
+<text x="195" y="1109" text-anchor="middle" class="ev">Cancelled Subscription · make.com + Slack</text>
+
+<rect class="box good" x="420" y="1052" width="280" height="76" rx="8"/>
+<text x="560" y="1072" text-anchor="middle" class="t">DAY-7 AUTOCHARGE → converts</text>
+<text x="560" y="1088" text-anchor="middle" class="s">tasks cron → payments.service.ts:1710</text>
+<text x="560" y="1103" text-anchor="middle" class="s">20% of June cohort · ~76% of conversions are passive</text>
+<text x="560" y="1118" text-anchor="middle" class="ev">new_subscription_payment · GA4 MP purchase</text>
+
+<rect class="box good" x="760" y="1052" width="250" height="70" rx="8"/>
+<text x="885" y="1072" text-anchor="middle" class="t">Upgrade checkout</text>
+<text x="885" y="1088" text-anchor="middle" class="s">packages.component.ts → payments :1349/:1410</text>
+<text x="885" y="1103" text-anchor="middle" class="ev">upgrade_package_payment (2–5/mo!)</text>
+
+<!-- retention loop from cancel flow -->
+<path class="edge loop" d="M195 1032 Q195 970 260 940 Q340 900 403 880"/>
+<text x="238" y="962" text-anchor="middle" class="lbl">AI retention call saves —</text>
+<text x="238" y="976" text-anchor="middle" class="lbl">back to the workspace</text>
+
+<!-- cancel -> end -->
+<path class="edge bad" d="M195 1120 V1160"/>
+<rect class="box bad" x="60" y="1162" width="270" height="58" rx="8"/>
+<text x="195" y="1182" text-anchor="middle" class="t">CANCELED — journey ends</text>
+<text x="195" y="1198" text-anchor="middle" class="ev">cancel_subscription_after_ai_agent_call (if called)</text>
+<text x="195" y="1212" text-anchor="middle" class="s">win-back: Klaviyo lifecycle emails only</text>
+
+<!-- autocharge -> paying -->
+<path class="edge good" d="M560 1128 V1168"/>
+<!-- upgrade -> paying -->
+<path class="edge good" d="M885 1122 Q885 1180 702 1198"/>
+
+<!-- ===== PAYING ===== -->
+<rect class="box good" x="420" y="1170" width="280" height="76" rx="8"/>
+<text x="560" y="1190" text-anchor="middle" class="t">PAYING CUSTOMER</text>
+<text x="560" y="1206" text-anchor="middle" class="s">$99–$1,200/mo plans · median 12-mo value $959</text>
+<text x="560" y="1221" text-anchor="middle" class="s">quotas per plan · usage metered by proxy on every call</text>
+<text x="560" y="1236" text-anchor="middle" class="ev">health score: usage-board.service.ts:1909</text>
+
+<!-- paying: big loop back to hub (left far) -->
+<path class="edge loop" d="M420 1200 Q60 1160 50 900 Q46 760 100 700 Q160 646 200 672"/>
+<text x="86" y="960" text-anchor="middle" class="lbl">daily work loop —</text>
+<text x="86" y="974" text-anchor="middle" class="lbl">same features, plan quotas.</text>
+<text x="86" y="988" text-anchor="middle" class="lbl">NO upgrade prompts for</text>
+<text x="86" y="1002" text-anchor="middle" class="lbl">paying users (expansion gap)</text>
+
+<!-- paying -> renewal -->
+<path class="edge" d="M700 1214 H758"/>
+<rect class="box" x="760" y="1180" width="250" height="70" rx="8"/>
+<text x="885" y="1200" text-anchor="middle" class="t">Renewal cron (monthly/annual)</text>
+<text x="885" y="1216" text-anchor="middle" class="s">payments.service.ts:2210 Stripe · :2325 Cardcom</text>
+<text x="885" y="1231" text-anchor="middle" class="ev">payment_success (partial coverage)</text>
+
+<!-- renewal success loop back to paying -->
+<path class="edge loop good" d="M860 1250 Q800 1290 702 1240"/>
+<text x="800" y="1284" text-anchor="middle" class="lbl">renews — stays paying</text>
+
+<!-- renewal failure -> dunning -->
+<path class="edge bad" d="M940 1250 V1288"/>
+<text x="982" y="1274" class="lbl">charge fails</text>
+<rect class="box bad" x="800" y="1290" width="280" height="70" rx="8"/>
+<text x="940" y="1310" text-anchor="middle" class="t">DUNNING — retry loop</text>
+<text x="940" y="1326" text-anchor="middle" class="s">retries invisible: no recovery tracking (gap)</text>
+<text x="940" y="1341" text-anchor="middle" class="ev">payment_failed (218 events/30d — count users!)</text>
+<path class="edge loop" d="M798 1320 Q740 1300 762 1240"/>
+<text x="738" y="1330" text-anchor="middle" class="lbl">retry</text>
+
+<!-- paying -> cancel (churn) -->
+<path class="edge bad" d="M420 1226 Q330 1240 260 1180 Q220 1150 205 1122"/>
+<text x="330" y="1258" text-anchor="middle" class="lbl">churns — same cancel flow (needs prior-payment filter in analytics)</text>
+
+<!-- upgrade loop paying -->
+<path class="edge loop" d="M700 1180 Q740 1140 758 1110"/>
+<text x="746" y="1156" text-anchor="middle" class="lbl">upgrades (rare)</text>
+
+<!-- ===== every-step event note ===== -->
+<rect class="box" x="330" y="1400" width="460" height="118" rx="8"/>
+<text x="560" y="1422" text-anchor="middle" class="t">EVERY step above also fans out behind the scenes</text>
+<text x="560" y="1442" text-anchor="middle" class="s">3 emitters → CLOSE_WEBHOOK_URL (Q1) → imai_events (~4.6M rows)</text>
+<text x="560" y="1458" text-anchor="middle" class="s">→ Mixpanel (props stripped, Q27) · Klaviyo lifecycle emails · Close CRM</text>
+<text x="560" y="1474" text-anchor="middle" class="s">+ proxy writes billing/usage rows on every API response (parallel truth)</text>
+<text x="560" y="1494" text-anchor="middle" class="ev">fire-and-forget · no retry · no queue — losses are by design</text>
+<path class="edge loop" d="M560 1246 V1398"/>
+
+</svg>
+</div>
+
+<h2>How to read it</h2>
+<ul>
+  <li><b>Diamonds are real branches in code</b>: the onboarding skip-list (since 2026-07-21 all IMAI signups bypass the wizard), the abuse gate (<code>payments.service.ts:1545</code>, blocking 31% of card-enterers with no recovery path), and quota enforcement (<code>users.service.ts:1707/:1719</code>).</li>
+  <li><b>The workspace hub is a loop, not a line</b> — users bounce between the seven feature modules and return; each bounce is metered by the proxy and quota-checked server-side. The whole trial outcome is decided inside this loop's first ~4 hours (median cancel time).</li>
+  <li><b>Three circle-backs matter most:</b> friction-modal dismiss → back to work (40% of trials see it); AI retention call → back from the cancel flow; and the paying-customer daily loop, which notably has <b>no upgrade prompts</b> — the expansion gap.</li>
+  <li><b>Two ends of the line:</b> BLOCKED (gate) and CANCELED — after cancel, the only touchpoint left is Klaviyo lifecycle email.</li>
+  <li><b>The gray box at the bottom applies to every node</b>: each step's event rides the fire-and-forget webhook pipeline to imai_events → Mixpanel/Klaviyo/Close.</li>
+</ul>
+
+<footer>Companion pages: <a href="user-flows.html">User Flows</a> (step-by-step with drop-off %) · <a href="events.html">Events &amp; Analytics</a> (what each step emits) · <a href="metrics.html">Metrics</a> (the numbers on the arrows). Sales-led and conversion-pixel journeys are on the User Flows page.</footer>
+</div>
+</body>
+</html>
