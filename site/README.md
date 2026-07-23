@@ -3,21 +3,24 @@
 Static, zero-build knowledge site generated from the Discovery-imai code
 audit (verified @ `da98fcf2`, 2026-07-22) and live Mixpanel measurement.
 
-## Deploy to Vercel (2 minutes)
+## Deployment status
 
-1. vercel.com → **Add New… → Project** → Import `caras-new-voices/imai-data-work`.
-2. **Root Directory: `site`** (Framework preset: "Other" — it's plain HTML,
-   no build command, output dir = root).
-3. Deploy. Every push to the tracked branch redeploys.
+**LIVE: https://imai-how-it-works.vercel.app** — deployed 2026-07-22 via
+CLI (`npx vercel deploy --prod`) to project `imai-how-it-works` on the
+`new-voices` team, using the session's `VERCEL_TOKEN`. This is a one-shot
+CLI deploy, NOT git-connected: pushes to this repo do NOT redeploy.
 
-Notes:
-- Vercel deploys the repo's production branch by default. This work lives on
-  `claude/new-session-zy3mol` — either point the Vercel project's Production
-  Branch setting at it, or merge to the default branch first.
-- The audit corpus contains internal details (env-var names, funnel/revenue
-  numbers). `vercel.json` sets `X-Robots-Tag: noindex`, but you should ALSO
-  enable **Vercel Deployment Protection** (project → Settings → Deployment
-  Protection) so the site isn't world-readable.
+To redeploy after content changes: copy `site/` to a directory named
+`imai-how-it-works`, then from inside it run
+`npx vercel deploy --prod --yes --token "$VERCEL_TOKEN"`.
+
+⚠ **The site is PUBLIC.** Vercel Authentication for production deployments
+is not available on the team's current plan (API returned
+`invalid_sso_protection`); `vercel.json` sets `X-Robots-Tag: noindex`, but
+anyone with the URL can read it, and it contains internal funnel/revenue
+numbers. Options: upgrade the Vercel plan and enable Deployment
+Protection, or take it down with
+`npx vercel remove imai-how-it-works --token "$VERCEL_TOKEN"`.
 
 ## Updating content
 
