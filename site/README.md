@@ -14,13 +14,18 @@ To redeploy after content changes: copy `site/` to a directory named
 `imai-how-it-works`, then from inside it run
 `npx vercel deploy --prod --yes --token "$VERCEL_TOKEN"`.
 
-⚠ **The site is PUBLIC.** Vercel Authentication for production deployments
-is not available on the team's current plan (API returned
-`invalid_sso_protection`); `vercel.json` sets `X-Robots-Tag: noindex`, but
-anyone with the URL can read it, and it contains internal funnel/revenue
-numbers. Options: upgrade the Vercel plan and enable Deployment
-Protection, or take it down with
-`npx vercel remove imai-how-it-works --token "$VERCEL_TOKEN"`.
+🔒 **Password-protected since 2026-07-22.** `middleware.js` (Vercel Edge
+Middleware) enforces HTTP Basic Auth on EVERY route server-side — nothing
+is served without credentials, which also blocks scrapers. Any username;
+the password lives in the project's encrypted `SITE_PASSWORD` env var
+(set via API, never committed — ask the team for it). 401 responses are
+`no-store` + `noindex`. Both pre-protection deployments were deleted, so
+no unprotected immutable URL survives. To rotate the password: update the
+`SITE_PASSWORD` env var via dashboard/API, then redeploy (env vars are
+baked at deploy time).
+
+(Native Vercel Authentication/password protection is plan-gated —
+`invalid_sso_protection` — hence the middleware approach.)
 
 ## Updating content
 
